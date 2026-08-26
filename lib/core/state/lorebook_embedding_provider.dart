@@ -9,6 +9,7 @@ import '../llm/embedding_service.dart';
 import '../llm/lorebook_embedding_service.dart';
 import '../llm/lorebook_vector_search.dart';
 import '../llm/session_lorebook_embedding_worker.dart';
+import '../llm/transport/llm_protocol_capabilities.dart';
 import '../models/api_config.dart';
 import 'db_provider.dart';
 
@@ -24,6 +25,23 @@ EmbeddingConfig resolveEmbeddingConfig(ApiConfig? chatConfig) {
       !chatConfig.embeddingEnabled) {
     return const EmbeddingConfig(endpoint: '', model: '');
   }
+  final supportsSharedEmbeddings = LlmProtocolCapabilities.forProtocol(
+    chatConfig.protocol,
+  ).supportsSharedEmbeddings;
+  if (!supportsSharedEmbeddings) {
+    if (chatConfig.embeddingEndpoint.trim().isEmpty ||
+        chatConfig.embeddingApiKey.trim().isEmpty ||
+        chatConfig.embeddingModel.trim().isEmpty) {
+      return const EmbeddingConfig(endpoint: '', model: '');
+    }
+    return EmbeddingConfig(
+      endpoint: chatConfig.embeddingEndpoint,
+      apiKey: chatConfig.embeddingApiKey,
+      model: chatConfig.embeddingModel,
+      maxChunkTokens: chatConfig.embeddingMaxChunkTokens,
+      requestsPerMinute: chatConfig.embeddingRequestsPerMinute,
+    );
+  }
   if (chatConfig.embeddingUseSame || chatConfig.embeddingEndpoint.isEmpty) {
     return EmbeddingConfig(
       endpoint: chatConfig.endpoint,
@@ -34,15 +52,14 @@ EmbeddingConfig resolveEmbeddingConfig(ApiConfig? chatConfig) {
       maxChunkTokens: chatConfig.embeddingMaxChunkTokens,
       requestsPerMinute: chatConfig.embeddingRequestsPerMinute,
     );
-  } else {
-    return EmbeddingConfig(
-      endpoint: chatConfig.embeddingEndpoint,
-      apiKey: chatConfig.embeddingApiKey,
-      model: chatConfig.embeddingModel,
-      maxChunkTokens: chatConfig.embeddingMaxChunkTokens,
-      requestsPerMinute: chatConfig.embeddingRequestsPerMinute,
-    );
   }
+  return EmbeddingConfig(
+    endpoint: chatConfig.embeddingEndpoint,
+    apiKey: chatConfig.embeddingApiKey,
+    model: chatConfig.embeddingModel,
+    maxChunkTokens: chatConfig.embeddingMaxChunkTokens,
+    requestsPerMinute: chatConfig.embeddingRequestsPerMinute,
+  );
 }
 
 final lorebookVectorSearchProvider = Provider<LorebookVectorSearch>((ref) {

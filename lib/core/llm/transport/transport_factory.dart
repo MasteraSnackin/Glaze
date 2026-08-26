@@ -1,6 +1,7 @@
 import '../../models/api_config.dart';
 import 'anthropic_chat_transport.dart';
 import 'chat_transport.dart';
+import 'codex_chat_transport.dart';
 import 'gemini_chat_transport.dart';
 import 'llm_protocol.dart';
 import 'llm_request_dump.dart';
@@ -32,6 +33,8 @@ ChatTransport pickChatTransport(String protocol) {
       inner = GeminiChatTransport();
     case LlmProtocol.openrouter:
       inner = OpenRouterChatTransport();
+    case LlmProtocol.codexChatgpt:
+      inner = CodexChatTransport();
     default:
       inner = CustomChatCompletionTransport();
   }

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/llm/embedding_request_gate.dart';
 import 'package:glaze_flutter/core/state/lorebook_embedding_provider.dart';
@@ -40,6 +41,45 @@ void main() {
       expect(config.model, api.embeddingModel);
       expect(config.maxChunkTokens, 256);
       expect(config.requestsPerMinute, 40);
+    });
+
+    test('Codex never falls back to preserved HTTP chat credentials', () {
+      const api = ApiConfig(
+        id: 'codex',
+        protocol: LlmProtocol.codexChatgpt,
+        endpoint: 'https://paid-api.example/v1',
+        apiKey: 'preserved-paid-key',
+        model: 'paid-chat-model',
+        embeddingEnabled: true,
+        embeddingUseSame: true,
+      );
+
+      final config = resolveEmbeddingConfig(api);
+
+      expect(config.endpoint, isEmpty);
+      expect(config.apiKey, isEmpty);
+      expect(config.model, isEmpty);
+    });
+
+    test('Codex uses only a complete separate embedding connection', () {
+      const api = ApiConfig(
+        id: 'codex',
+        protocol: LlmProtocol.codexChatgpt,
+        endpoint: 'https://paid-api.example/v1',
+        apiKey: 'preserved-paid-key',
+        model: 'paid-chat-model',
+        embeddingEnabled: true,
+        embeddingUseSame: false,
+        embeddingEndpoint: 'https://embeddings.example/v1',
+        embeddingApiKey: 'embedding-key',
+        embeddingModel: 'embedding-model',
+      );
+
+      final config = resolveEmbeddingConfig(api);
+
+      expect(config.endpoint, api.embeddingEndpoint);
+      expect(config.apiKey, api.embeddingApiKey);
+      expect(config.model, api.embeddingModel);
     });
   });
 

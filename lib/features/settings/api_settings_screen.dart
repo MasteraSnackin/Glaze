@@ -4,10 +4,13 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/converters/prompt_post_processing.dart';
 import '../../core/llm/transport/llm_protocol.dart';
+import '../../core/llm/transport/llm_protocol_capabilities.dart';
+import '../../core/llm/transport/llm_protocol_platform_support.dart';
 import '../../core/llm/transport/transport_factory.dart';
 import '../../core/services/api_connection_tester.dart';
 import '../../core/models/api_config.dart';
@@ -28,9 +31,23 @@ import '../studio/widgets/studio_slots_tab.dart';
 import 'api_list_provider.dart';
 import 'api_preset_selection_provider.dart';
 import 'api_preset_sort.dart';
+import 'widgets/codex_account_bridge.dart';
+import 'widgets/codex_account_bridge_types.dart';
 import 'widgets/connection_status.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/extra_request_parameters_editor.dart';
+
+enum _CodexAccountState {
+  idle,
+  checking,
+  signingIn,
+  signedOut,
+  signedIn,
+  apiKeyAccount,
+  unavailable,
+  desktopOnly,
+  failed,
+}
 
 class ApiSettingsScreen extends ConsumerStatefulWidget {
   final bool startExpanded;
@@ -49,6 +66,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   String _llmError = '';
   ApiConnectionStatus _embStatus = ApiConnectionStatus.idle;
   List<Map<String, dynamic>> _fetchedModels = [];
+  final CodexSettingsAccountClient _codexAccountService =
+      createCodexSettingsAccountClient();
+  _CodexAccountState _codexAccountState = _CodexAccountState.idle;
+  String? _codexPlanType;
+  int _codexAccountRequestId = 0;
 
   // Text controllers
   final _nameCtrl = TextEditingController();
@@ -156,6 +178,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   @override
   void dispose() {
+    _codexAccountRequestId++;
     _flushSave();
     _llmScrollController.dispose();
     _embScrollController.dispose();
@@ -265,6 +288,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     });
 
     _loading = false;
+    if (_protocol == LlmProtocol.codexChatgpt) {
+      unawaited(_refreshCodexAccount());
+    } else {
+      _codexAccountRequestId++;
+      _codexAccountState = _CodexAccountState.idle;
+      _codexPlanType = null;
+    }
   }
 
   Future<void> _save() async {
@@ -317,9 +347,14 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     await _ref.read(apiListProvider.notifier).put(draft.toConfig(config));
   }
 
-  bool get _supportsTemperature => true;
+  bool get _isCodex => _protocol == LlmProtocol.codexChatgpt;
 
-  bool get _supportsTopP => true;
+  LlmProtocolCapabilities get _protocolCapabilities =>
+      LlmProtocolCapabilities.forProtocol(_protocol);
+
+  bool get _supportsTemperature => !_isCodex;
+
+  bool get _supportsTopP => !_isCodex;
 
   /// The Responses API has no `top_k` and no penalties, so those controls are
   /// hidden for it rather than shown and silently ignored.
@@ -369,9 +404,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _isResponses ||
       (_protocol == LlmProtocol.customChatCompletion && _customUseResponsesApi);
 
-  // Every protocol accepts temperature and top_p, and every transport honors
-  // the matching omit* flag, so the include toggles are shown unconditionally —
-  // they used to be OpenAI-shaped only.
+  // HTTP protocols accept temperature and top_p, and their transports honour
+  // the matching omit* flag. Codex App Server does not expose either sampling
+  // control, so its settings deliberately omit them instead of silently
+  // ignoring user input.
 
   bool get _hideSamplingWhileReasoningAnthropic =>
       _protocol == LlmProtocol.anthropic && _requestReasoning;
@@ -394,6 +430,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         frequencyPenalty: _frequencyPenalty,
         presencePenalty: _presencePenalty,
         cacheControlTtl: _cacheControlTtl,
+        embeddingUseSame: _embeddingUseSame,
       ),
     );
     _protocol = normalized.protocol;
@@ -405,6 +442,148 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _frequencyPenalty = normalized.frequencyPenalty;
     _presencePenalty = normalized.presencePenalty;
     _cacheControlTtl = normalized.cacheControlTtl;
+    _embeddingUseSame = normalized.embeddingUseSame;
+  }
+
+  _CodexAccountState _codexStateForError(Object error) {
+    if (error is! CodexSettingsException) return _CodexAccountState.failed;
+    return switch (error.kind) {
+      CodexSettingsFailureKind.signedOut => _CodexAccountState.signedOut,
+      CodexSettingsFailureKind.apiKeyAccount =>
+        _CodexAccountState.apiKeyAccount,
+      CodexSettingsFailureKind.notInstalled => _CodexAccountState.unavailable,
+      CodexSettingsFailureKind.unsupportedPlatform =>
+        _CodexAccountState.desktopOnly,
+      CodexSettingsFailureKind.other => _CodexAccountState.failed,
+    };
+  }
+
+  Future<void> _refreshCodexAccount() async {
+    final requestId = ++_codexAccountRequestId;
+    if (!_isCodex) return;
+    if (!LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(_protocol)) {
+      if (!mounted || requestId != _codexAccountRequestId) return;
+      setState(() {
+        _codexAccountState = _CodexAccountState.desktopOnly;
+        _codexPlanType = null;
+      });
+      return;
+    }
+
+    setState(() => _codexAccountState = _CodexAccountState.checking);
+    try {
+      final account = await _codexAccountService.readAccount();
+      if (!mounted || requestId != _codexAccountRequestId || !_isCodex) return;
+      setState(() {
+        if (account == null) {
+          _codexAccountState = _CodexAccountState.signedOut;
+          _codexPlanType = null;
+        } else if (account.isChatGpt) {
+          _codexAccountState = _CodexAccountState.signedIn;
+          _codexPlanType = account.planType;
+        } else {
+          _codexAccountState = _CodexAccountState.apiKeyAccount;
+          _codexPlanType = null;
+        }
+      });
+    } catch (error) {
+      if (!mounted || requestId != _codexAccountRequestId || !_isCodex) return;
+      setState(() {
+        _codexAccountState = _codexStateForError(error);
+        _codexPlanType = null;
+      });
+    }
+  }
+
+  Future<void> _signInToCodexChatGpt() async {
+    if (!_isCodex ||
+        !LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(_protocol)) {
+      return;
+    }
+    final requestId = ++_codexAccountRequestId;
+    setState(() => _codexAccountState = _CodexAccountState.signingIn);
+    try {
+      final account = await _codexAccountService.signInWithChatGpt(
+        openBrowser: (uri) =>
+            launchUrl(uri, mode: LaunchMode.externalApplication),
+      );
+      if (!mounted || requestId != _codexAccountRequestId || !_isCodex) return;
+      setState(() {
+        _codexAccountState = _CodexAccountState.signedIn;
+        _codexPlanType = account.planType;
+      });
+      GlazeToast.show(context, 'settings_codex_sign_in_complete'.tr());
+    } catch (error) {
+      if (!mounted || requestId != _codexAccountRequestId || !_isCodex) return;
+      setState(() {
+        _codexAccountState = _codexStateForError(error);
+        _codexPlanType = null;
+      });
+      GlazeErrorDialog.show(
+        context,
+        error,
+        prefix: 'settings_codex_sign_in_failed'.tr(),
+      );
+    }
+  }
+
+  String get _codexAccountStatusText {
+    return switch (_codexAccountState) {
+      _CodexAccountState.idle ||
+      _CodexAccountState.checking => 'settings_codex_account_checking'.tr(),
+      _CodexAccountState.signingIn => 'settings_codex_account_signing_in'.tr(),
+      _CodexAccountState.signedOut => 'settings_codex_account_signed_out'.tr(),
+      _CodexAccountState.signedIn =>
+        _codexPlanType == null || _codexPlanType!.trim().isEmpty
+            ? 'settings_codex_account_signed_in'.tr()
+            : 'settings_codex_account_signed_in_plan'.tr(
+                namedArgs: {'plan': _codexPlanType!},
+              ),
+      _CodexAccountState.apiKeyAccount => 'settings_codex_account_api_key'.tr(),
+      _CodexAccountState.unavailable =>
+        'settings_codex_account_unavailable'.tr(),
+      _CodexAccountState.desktopOnly =>
+        'settings_codex_account_desktop_only'.tr(),
+      _CodexAccountState.failed => 'settings_codex_account_failed'.tr(),
+    };
+  }
+
+  Widget _buildCodexAccountItem() {
+    final busy =
+        _codexAccountState == _CodexAccountState.checking ||
+        _codexAccountState == _CodexAccountState.signingIn;
+    final signedIn = _codexAccountState == _CodexAccountState.signedIn;
+    return MenuItem(
+      key: const ValueKey('codex-chatgpt-account'),
+      icon: Icons.account_circle_outlined,
+      label: 'settings_codex_account'.tr(),
+      subtitle:
+          '$_codexAccountStatusText\n${'settings_codex_account_privacy'.tr()}',
+      trailing: busy
+          ? const SizedBox(width: 18, height: 18, child: GlazeSpinner())
+          : Icon(
+              signedIn ? Icons.refresh_rounded : Icons.login_rounded,
+              color: context.cs.onSurfaceVariant,
+              size: 20,
+            ),
+      onTap: () {
+        switch (_codexAccountState) {
+          case _CodexAccountState.checking ||
+              _CodexAccountState.signingIn ||
+              _CodexAccountState.desktopOnly:
+            return;
+          case _CodexAccountState.signedOut || _CodexAccountState.apiKeyAccount:
+            unawaited(_signInToCodexChatGpt());
+            return;
+          case _CodexAccountState.idle ||
+              _CodexAccountState.signedIn ||
+              _CodexAccountState.unavailable ||
+              _CodexAccountState.failed:
+            unawaited(_refreshCodexAccount());
+            return;
+        }
+      },
+    );
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────────
@@ -587,22 +766,23 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             children: [
               _buildSamplingGroup(),
               _buildPromptPostProcessingGroup(),
-              _buildCacheGroup(),
+              if (!_isCodex) _buildCacheGroup(),
               _buildReasoningDeliveryGroup(),
               _buildOtherGroup(),
-              ExtraRequestParametersEditor(
-                key: ValueKey('api-extra-parameters-$_loadedPresetId'),
-                parameters: _extraRequestParameters,
-                title: 'extra_request_parameters'.tr(),
-                description: 'extra_request_parameters_desc'.tr(),
-                keyLabel: 'extra_request_parameter_key'.tr(),
-                valueLabel: 'extra_request_parameter_value'.tr(),
-                addLabel: 'extra_request_parameter_add'.tr(),
-                onChanged: (parameters) {
-                  _extraRequestParameters = parameters;
-                  _scheduleSave();
-                },
-              ),
+              if (!_isCodex)
+                ExtraRequestParametersEditor(
+                  key: ValueKey('api-extra-parameters-$_loadedPresetId'),
+                  parameters: _extraRequestParameters,
+                  title: 'extra_request_parameters'.tr(),
+                  description: 'extra_request_parameters_desc'.tr(),
+                  keyLabel: 'extra_request_parameter_key'.tr(),
+                  valueLabel: 'extra_request_parameter_value'.tr(),
+                  addLabel: 'extra_request_parameter_add'.tr(),
+                  onChanged: (parameters) {
+                    _extraRequestParameters = parameters;
+                    _scheduleSave();
+                  },
+                ),
             ],
           ),
         ],
@@ -626,7 +806,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           currentValue: LlmProtocol.labels[_protocol] ?? _protocol,
           onTap: _openProtocolSelector,
         ),
-        if (_protocol != LlmProtocol.openrouter)
+        if (_isCodex) _buildCodexAccountItem(),
+        if (_protocolCapabilities.requiresEndpoint)
           MenuFieldItem(
             label: 'onboarding_label_endpoint'.tr(),
             controller: _endpointCtrl,
@@ -653,23 +834,24 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   onPressed: _openModelSelector,
                 ),
         ),
-        MenuFieldItem(
-          label: 'onboarding_label_key'.tr(),
-          helpTerm: 'apikey',
-          controller: _keyCtrl,
-          placeholder: 'sk-...',
-          obscure: !_showApiKey,
-          suffix: IconButton(
-            icon: Icon(
-              _showApiKey
-                  ? Icons.visibility_off_outlined
-                  : Icons.visibility_outlined,
-              color: context.cs.onSurfaceVariant,
-              size: 20,
+        if (_protocolCapabilities.requiresApiKey)
+          MenuFieldItem(
+            label: 'onboarding_label_key'.tr(),
+            helpTerm: 'apikey',
+            controller: _keyCtrl,
+            placeholder: 'sk-...',
+            obscure: !_showApiKey,
+            suffix: IconButton(
+              icon: Icon(
+                _showApiKey
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                color: context.cs.onSurfaceVariant,
+                size: 20,
+              ),
+              onPressed: () => setState(() => _showApiKey = !_showApiKey),
             ),
-            onPressed: () => setState(() => _showApiKey = !_showApiKey),
           ),
-        ),
         MenuSwitchItem(
           label: 'label_stream'.tr(),
           helpTerm: 'streaming',
@@ -717,13 +899,14 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               _scheduleSave();
             },
           ),
-        MenuFieldItem(
-          label: 'label_max_tokens'.tr(),
-          helpTerm: 'max-tokens',
-          controller: _maxTokensCtrl,
-          placeholder: '8000',
-          keyboardType: TextInputType.number,
-        ),
+        if (!_isCodex)
+          MenuFieldItem(
+            label: 'label_max_tokens'.tr(),
+            helpTerm: 'max-tokens',
+            controller: _maxTokensCtrl,
+            placeholder: '8000',
+            keyboardType: TextInputType.number,
+          ),
         MenuFieldItem(
           label: 'label_context_size'.tr(),
           helpTerm: 'context-size',
@@ -1029,16 +1212,29 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                 },
               ),
               if (_embeddingEnabled) ...[
-                MenuSwitchItem(
-                  label: 'settings_use_llm_api'.tr(),
-                  description: 'settings_use_llm_api_desc'.tr(),
-                  value: _embeddingUseSame,
-                  onChanged: (v) {
-                    setState(() => _embeddingUseSame = v);
-                    _scheduleSave();
-                  },
-                ),
-                if (!_embeddingUseSame) ...[
+                if (!_protocolCapabilities.supportsSharedEmbeddings)
+                  MenuItem(
+                    key: const ValueKey('codex-separate-embeddings'),
+                    icon: Icons.info_outline_rounded,
+                    label: 'settings_codex_separate_embeddings'.tr(),
+                    subtitle: 'settings_codex_separate_embeddings_desc'.tr(),
+                    onTap: () => GlazeToast.show(
+                      context,
+                      'settings_codex_separate_embeddings_desc'.tr(),
+                    ),
+                  )
+                else
+                  MenuSwitchItem(
+                    label: 'settings_use_llm_api'.tr(),
+                    description: 'settings_use_llm_api_desc'.tr(),
+                    value: _embeddingUseSame,
+                    onChanged: (v) {
+                      setState(() => _embeddingUseSame = v);
+                      _scheduleSave();
+                    },
+                  ),
+                if (!_protocolCapabilities.supportsSharedEmbeddings ||
+                    !_embeddingUseSame) ...[
                   MenuFieldItem(
                     label: 'settings_embedding_endpoint'.tr(),
                     controller: _embEndpointCtrl,
@@ -1056,7 +1252,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                     obscure: true,
                   ),
                 ],
-                if (_embeddingUseSame)
+                if (_embeddingUseSame &&
+                    _protocolCapabilities.supportsSharedEmbeddings)
                   MenuFieldItem(
                     label: 'settings_embedding_model'.tr(),
                     controller: _embModelCtrl,
@@ -1173,9 +1370,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         // The active id falls back to the *repository's* first preset, the same
         // one activeApiConfigProvider picks — sorting only reorders what is
         // shown, so it must not move the highlight to another row.
-        final activeId =
-            ref.watch(activeApiPresetIdProvider) ??
-            (list.isNotEmpty ? list.first.id : null);
+        final activeId = ref.watch(activeApiConfigProvider)?.id;
         final sorted = sortApiConfigs(list, sort);
         return BottomSheetCards(
           items: [
@@ -1246,9 +1441,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         : config.model.isNotEmpty
         ? config.model
         : 'unnamed_entry'.tr();
+    final isCodexConfig = config.protocol == LlmProtocol.codexChatgpt;
+    final isAvailable = LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+      config.protocol,
+    );
 
     String? faviconUrl;
-    if (config.endpoint.isNotEmpty) {
+    if (!isCodexConfig && config.endpoint.isNotEmpty) {
       try {
         final uri = Uri.parse(config.endpoint);
         if (uri.host.isNotEmpty &&
@@ -1263,7 +1462,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     return BottomSheetCardItem(
       id: config.id,
       label: name,
-      sublabel: config.endpoint.isNotEmpty
+      sublabel: isCodexConfig
+          ? (isAvailable
+                ? 'settings_codex_preset_sublabel'.tr()
+                : 'settings_codex_account_desktop_only'.tr())
+          : config.endpoint.isNotEmpty
           ? config.endpoint
                 .replaceAll(RegExp(r'https?://'), '')
                 .split('/')
@@ -1275,11 +1478,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           ? (isSelected
                 ? Icons.check_circle_rounded
                 : Icons.radio_button_unchecked_rounded)
-          : (isActive
+          : (!isAvailable
+                ? Icons.desktop_windows_outlined
+                : isActive
                 ? Icons.radio_button_checked_rounded
                 : Icons.radio_button_unchecked_rounded),
       faviconUrl: selection.active ? null : faviconUrl,
-      isActive: selection.active ? isSelected : isActive,
+      isActive: selection.active ? isSelected : isAvailable && isActive,
       // While dragging is armed a long press lifts the row, so it can't also
       // open multi-select.
       onLongPress: reordering
@@ -1302,6 +1507,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       onTap: () {
         if (selection.active) {
           ref.read(apiPresetSelectionProvider.notifier).toggle(config.id);
+          return;
+        }
+        if (!isAvailable) {
+          GlazeToast.show(context, 'settings_codex_account_desktop_only'.tr());
           return;
         }
         Navigator.of(context, rootNavigator: true).pop();
@@ -1332,10 +1541,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   void _confirmDeleteSelected(ApiPresetSelectionState selection) {
     final ids = selection.ids.toList();
     if (ids.isEmpty) return;
-    final list = ref.read(apiListProvider).value ?? const <ApiConfig>[];
-    final activeId =
-        ref.read(activeApiPresetIdProvider) ??
-        (list.isNotEmpty ? list.first.id : null);
+    final activeId = ref.read(activeApiConfigProvider)?.id;
     GlazeBottomSheet.show<void>(
       context,
       title: 'action_delete'.tr(),
@@ -1625,10 +1831,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   }
 
   void _openProtocolSelector() {
+    final protocols = LlmProtocol.all.where(
+      LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform,
+    );
     GlazeBottomSheet.show<void>(
       context,
       title: 'settings_protocol'.tr(),
-      items: LlmProtocol.all.map((p) {
+      items: protocols.map((p) {
         final label = LlmProtocol.labels[p] ?? p;
         final active = p == _protocol;
         return BottomSheetItem(
@@ -1641,7 +1850,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
               _protocol = p;
               _applyProtocolUiPolicy(_protocol);
               _fetchedModels = [];
+              _isLoadingModels = false;
+              _llmStatus = ApiConnectionStatus.idle;
+              _llmError = '';
+              if (!_isCodex) {
+                _codexAccountRequestId++;
+                _codexAccountState = _CodexAccountState.idle;
+                _codexPlanType = null;
+              }
             });
+            if (_isCodex) unawaited(_refreshCodexAccount());
             _scheduleSave();
           },
         );
@@ -1650,42 +1868,61 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   }
 
   Future<void> _fetchModels() async {
+    final protocol = _protocol;
+    final capabilities = LlmProtocolCapabilities.forProtocol(protocol);
+    final isCodex = protocol == LlmProtocol.codexChatgpt;
     final endpoint = _endpointCtrl.text.trim();
     final apiKey = _keyCtrl.text.trim();
-    final endpointRequired = _protocol != LlmProtocol.openrouter;
-    if ((endpointRequired && endpoint.isEmpty) || apiKey.isEmpty) {
+    if (!capabilities.hasRequiredConnectionFields(
+      endpoint: endpoint,
+      apiKey: apiKey,
+    )) {
       GlazeToast.show(context, 'settings_err_endpoint_key'.tr());
       return;
     }
     setState(() => _isLoadingModels = true);
     try {
-      final models = await pickChatTransport(
-        _protocol,
-      ).fetchModels(endpoint: endpoint, apiKey: apiKey);
-      if (!mounted) return;
+      final models = isCodex
+          ? await _codexAccountService.listModels()
+          : await pickChatTransport(
+              protocol,
+            ).fetchModels(endpoint: endpoint, apiKey: apiKey);
+      if (!mounted || protocol != _protocol) return;
       setState(() {
         _fetchedModels = models;
         _isLoadingModels = false;
+        if (isCodex) _codexAccountState = _CodexAccountState.signedIn;
       });
       if (models.isEmpty) {
         GlazeToast.show(context, 'settings_err_no_models'.tr());
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoadingModels = false);
+      if (mounted && protocol == _protocol) {
+        setState(() {
+          _isLoadingModels = false;
+          if (isCodex) {
+            _codexAccountState = _codexStateForError(e);
+            _codexPlanType = null;
+          }
+        });
         GlazeErrorDialog.show(context, e, prefix: 'settings_err_failed'.tr());
       }
     }
   }
 
   Future<void> _testLlmConnection() async {
+    final protocol = _protocol;
+    final capabilities = LlmProtocolCapabilities.forProtocol(protocol);
+    final isCodex = protocol == LlmProtocol.codexChatgpt;
     final endpoint = _endpointCtrl.text.trim();
     final apiKey = _keyCtrl.text.trim();
     final model = _modelCtrl.text.trim();
-    final endpointRequired = _protocol != LlmProtocol.openrouter;
     // Model is optional here: tapping the status should let the user verify the
     // provider connection even before a model has been picked.
-    if ((endpointRequired && endpoint.isEmpty) || apiKey.isEmpty) {
+    if (!capabilities.hasRequiredConnectionFields(
+      endpoint: endpoint,
+      apiKey: apiKey,
+    )) {
       GlazeToast.show(context, 'settings_err_endpoint_key'.tr());
       return;
     }
@@ -1693,14 +1930,64 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _llmStatus = ApiConnectionStatus.connecting;
       _llmError = '';
     });
+
+    if (isCodex) {
+      var accountVerified = false;
+      try {
+        final models = await _codexAccountService.listModels();
+        accountVerified = true;
+        if (models.isEmpty) {
+          throw CodexSettingsException(
+            CodexSettingsFailureKind.other,
+            'settings_err_no_models'.tr(),
+          );
+        }
+        final modelIds = models
+            .map((entry) => entry['id'])
+            .whereType<String>()
+            .toSet();
+        if (model.isNotEmpty && !modelIds.contains(model)) {
+          throw CodexSettingsException(
+            CodexSettingsFailureKind.other,
+            'settings_codex_selected_model_unavailable'.tr(
+              namedArgs: {'model': model},
+            ),
+          );
+        }
+        if (!mounted || protocol != _protocol) return;
+        setState(() {
+          _llmStatus = ApiConnectionStatus.connected;
+          _codexAccountState = _CodexAccountState.signedIn;
+          _fetchedModels = models;
+        });
+        GlazeToast.show(context, 'settings_codex_connection_ok'.tr());
+      } catch (error) {
+        if (!mounted || protocol != _protocol) return;
+        setState(() {
+          _llmStatus = ApiConnectionStatus.failed;
+          _llmError = error.toString();
+          _codexAccountState = accountVerified
+              ? _CodexAccountState.signedIn
+              : _codexStateForError(error);
+          if (!accountVerified) _codexPlanType = null;
+        });
+        GlazeErrorDialog.show(
+          context,
+          error,
+          prefix: 'settings_err_conn_failed'.tr(),
+        );
+      }
+      return;
+    }
+
     final result = await ApiConnectionTester().testLlm(
       endpoint: endpoint,
       apiKey: apiKey,
       model: model,
-      protocol: _protocol,
+      protocol: protocol,
       useResponsesApi: _useResponsesApi,
     );
-    if (!mounted) return;
+    if (!mounted || protocol != _protocol) return;
     switch (result) {
       case ApiTestSuccess(:final message):
         setState(() => _llmStatus = ApiConnectionStatus.connected);
@@ -1720,7 +2007,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   Future<void> _testEmbConnection() async {
     final String endpoint, apiKey, model;
-    if (_embeddingUseSame) {
+    if (_embeddingUseSame && _protocolCapabilities.supportsSharedEmbeddings) {
       endpoint = _endpointCtrl.text.trim();
       apiKey = _keyCtrl.text.trim();
       model = _embModelCtrl.text.trim().isNotEmpty

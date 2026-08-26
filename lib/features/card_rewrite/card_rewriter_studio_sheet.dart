@@ -10,6 +10,7 @@ import '../../core/db/app_db.dart'
 import '../../core/db/repositories/card_evolution_repo.dart'
     show CardEvolutionFinalizeOutcome;
 import '../../core/llm/model_fetcher.dart';
+import '../../core/llm/transport/llm_protocol_platform_support.dart';
 import '../../core/models/api_config.dart';
 import '../../core/models/card_rewriter_settings.dart';
 import '../../core/state/card_rewriter_providers.dart';
@@ -68,7 +69,14 @@ class _CardRewriterStudioSheetState
 
   Future<void> _selectApi(CardRewriterSettings settings) async {
     final configs = ref.read(apiListProvider).value ?? const <ApiConfig>[];
-    if (configs.isEmpty) {
+    final availableConfigs = configs
+        .where(
+          (config) => LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+            config.protocol,
+          ),
+        )
+        .toList(growable: false);
+    if (availableConfigs.isEmpty) {
       GlazeToast.show(context, 'card_rewriter_studio_no_api_configs'.tr());
       return;
     }
@@ -76,7 +84,7 @@ class _CardRewriterStudioSheetState
       context,
       title: 'card_rewriter_studio_api_title'.tr(),
       items: [
-        for (final config in configs)
+        for (final config in availableConfigs)
           BottomSheetItem(
             label: _apiLabel(config),
             hint: config.endpoint,
@@ -307,7 +315,13 @@ class _CardRewriterStudioSheetState
     );
     final configs = ref.watch(apiListProvider).value ?? const <ApiConfig>[];
     final config = configs
-        .where((item) => item.id == settings.apiConfigId)
+        .where(
+          (item) =>
+              item.id == settings.apiConfigId &&
+              LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+                item.protocol,
+              ),
+        )
         .firstOrNull;
     final models = <String>{
       ..._models,

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/aux_llm_client.dart';
+import '../../../core/llm/transport/llm_protocol_capabilities.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/utils/error_format.dart';
 import '../../../core/utils/id_generator.dart';
@@ -288,7 +289,12 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
 }) async {
   await ref.read(apiListProvider.future);
   final config = ref.read(activeApiConfigProvider);
-  if (config == null || config.endpoint.isEmpty || config.model.isEmpty) {
+  if (config == null) {
+    throw NoActiveConnectionException();
+  }
+  final capabilities = LlmProtocolCapabilities.forProtocol(config.protocol);
+  if ((capabilities.requiresEndpoint && config.endpoint.isEmpty) ||
+      config.model.isEmpty) {
     throw NoActiveConnectionException();
   }
   final settings = await ref.read(appSettingsProvider.future);

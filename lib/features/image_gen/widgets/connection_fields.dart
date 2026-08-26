@@ -154,16 +154,26 @@ List<Widget> buildA1111ConnectionFields(
 /// key fields. Otherwise both endpoint URL and API key are visible.
 List<Widget> buildOpenaiConnectionFields(
   ImageGenSettings s,
-  ValueChanged<ImageGenSettings> onUpdate,
-) {
+  ValueChanged<ImageGenSettings> onUpdate, {
+  bool allowSharedEndpoint = true,
+}) {
+  final useSameEndpoint = allowSharedEndpoint && s.useSameEndpoint;
   return [
-    MenuSwitchItem(
-      label: 'settings_use_llm_api'.tr(),
-      description: 'settings_use_llm_api_desc'.tr(),
-      value: s.useSameEndpoint,
-      onChanged: (v) => onUpdate(s.copyWith(useSameEndpoint: v)),
-    ),
-    if (!s.useSameEndpoint) ...[
+    if (allowSharedEndpoint)
+      MenuSwitchItem(
+        label: 'settings_use_llm_api'.tr(),
+        description: 'settings_use_llm_api_desc'.tr(),
+        value: s.useSameEndpoint,
+        onChanged: (v) => onUpdate(s.copyWith(useSameEndpoint: v)),
+      )
+    else
+      MenuItem(
+        icon: Icons.info_outline_rounded,
+        label: 'settings_codex_separate_images'.tr(),
+        subtitle: 'settings_codex_separate_images_desc'.tr(),
+        onTap: () {},
+      ),
+    if (!useSameEndpoint) ...[
       rows.ImageGenTextFieldItem(
         label: 'imggen_endpoint'.tr(),
         value: s.customEndpoint,

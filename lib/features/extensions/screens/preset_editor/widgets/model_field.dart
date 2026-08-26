@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../../core/llm/model_fetcher.dart';
+import '../../../../../core/llm/transport/llm_protocol_capabilities.dart';
+import '../../../../../core/llm/transport/llm_protocol_platform_support.dart';
 import '../../../../../core/models/api_config.dart';
 import '../../../../../shared/theme/app_colors.dart';
 import '../../../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -37,7 +39,14 @@ class ModelField extends ConsumerWidget {
       GlazeToast.show(context, 'API не найден');
       return;
     }
-    if (cfg.endpoint.isEmpty) {
+    if (!LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+      cfg.protocol,
+    )) {
+      GlazeToast.show(context, 'settings_codex_account_desktop_only'.tr());
+      return;
+    }
+    final capabilities = LlmProtocolCapabilities.forProtocol(cfg.protocol);
+    if (capabilities.requiresEndpoint && cfg.endpoint.isEmpty) {
       GlazeToast.show(context, 'У API не задан endpoint');
       return;
     }

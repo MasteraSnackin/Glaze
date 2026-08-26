@@ -11,6 +11,7 @@ import '../utils/error_format.dart';
 import 'agent_stream_runner.dart';
 import 'studio/agent_config_resolver.dart';
 import 'studio_turn_config_snapshot.dart';
+import 'transport/llm_protocol_capabilities.dart';
 import 'transport/transport_factory.dart';
 import 'studio_controller_ontology.dart';
 
@@ -151,7 +152,9 @@ class AgentRunner {
           apiConfigId: apiConfigId,
           turnConfig: turnConfig,
         );
-    if (resolved.endpoint.isEmpty || resolved.model.isEmpty) {
+    final capabilities = LlmProtocolCapabilities.forProtocol(resolved.protocol);
+    if ((capabilities.requiresEndpoint && resolved.endpoint.isEmpty) ||
+        resolved.model.isEmpty) {
       throw Exception('Studio agent "${agent.name}" API is not configured');
     }
     final timeoutMs = effectiveTimeoutMs(agent, isFinalResponse, turnConfig);

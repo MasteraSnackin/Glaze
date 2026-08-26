@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/model_fetcher.dart';
-import '../../../core/llm/transport/llm_protocol.dart';
+import '../../../core/llm/transport/llm_protocol_capabilities.dart';
+import '../../../core/llm/transport/llm_protocol_platform_support.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
@@ -291,9 +292,17 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
     if (id.isEmpty) return 'studio_slot_use_chat_api'.tr();
     final config = configs.where((c) => c.id == id).firstOrNull;
     if (config == null) return 'unnamed_entry'.tr();
-    if (config.name.isNotEmpty) return config.name;
-    if (config.model.isNotEmpty) return config.model;
-    return 'unnamed_entry'.tr();
+    final label = config.name.isNotEmpty
+        ? config.name
+        : config.model.isNotEmpty
+        ? config.model
+        : 'unnamed_entry'.tr();
+    if (!LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+      config.protocol,
+    )) {
+      return '$label — ${'settings_codex_account_desktop_only'.tr()}';
+    }
+    return label;
   }
 
   void _pickApiConfig(
@@ -321,7 +330,11 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
       title: 'studio_slot_api'.tr(),
       items: [
         radio('', 'studio_slot_use_chat_api'.tr()),
-        for (final config in configs)
+        for (final config in configs.where(
+          (config) => LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+            config.protocol,
+          ),
+        ))
           radio(
             config.id,
             config.name.isNotEmpty
@@ -345,7 +358,14 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
   /// endpoint other than the one the row displays.
   ApiConfig? _slotApiConfig(String apiConfigId, List<ApiConfig> configs) {
     if (apiConfigId.isNotEmpty) {
-      return configs.where((c) => c.id == apiConfigId).firstOrNull;
+      final selected = configs.where((c) => c.id == apiConfigId).firstOrNull;
+      if (selected == null ||
+          !LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+            selected.protocol,
+          )) {
+        return null;
+      }
+      return selected;
     }
     return ref.read(activeApiConfigProvider);
   }
@@ -358,7 +378,7 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
     final config = _slotApiConfig(apiConfigId, configs);
     final apiKey = config == null
         ? apiConfigId
-        : '${config.id}|${config.endpoint}|${config.model}';
+        : '${config.id}|${config.protocol}|${config.endpoint}|${config.model}';
     return '$slotName:$apiKey';
   }
 
@@ -375,16 +395,24 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
     final configs = ref.read(apiListProvider).value ?? const <ApiConfig>[];
     final cacheKey = _modelCacheKey(slotName, apiConfigId, configs);
     if (_fetchingModelSlots.contains(cacheKey)) return;
+    final selected = configs.where((c) => c.id == apiConfigId).firstOrNull;
+    if (selected != null &&
+        !LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+          selected.protocol,
+        )) {
+      GlazeToast.show(context, 'settings_codex_account_desktop_only'.tr());
+      return;
+    }
     final config = _slotApiConfig(apiConfigId, configs);
     if (config == null) {
       GlazeToast.show(context, 'studio_slot_no_api'.tr());
       return;
     }
-    // Same precondition as the LLM tab's fetch button: OpenRouter's URL is
-    // hardcoded, every other protocol needs an endpoint of its own.
-    final endpointRequired = config.protocol != LlmProtocol.openrouter;
-    if ((endpointRequired && config.endpoint.trim().isEmpty) ||
-        config.apiKey.trim().isEmpty) {
+    final capabilities = LlmProtocolCapabilities.forProtocol(config.protocol);
+    if (!capabilities.hasRequiredConnectionFields(
+      endpoint: config.endpoint,
+      apiKey: config.apiKey,
+    )) {
       GlazeToast.show(context, 'settings_err_endpoint_key'.tr());
       return;
     }

@@ -1,6 +1,7 @@
 import '../../core/llm/converters/prompt_post_processing.dart';
 import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/transport/llm_protocol.dart';
+import '../../core/llm/transport/llm_protocol_capabilities.dart';
 import '../../core/models/api_config.dart';
 
 /// Editable API settings values, kept independent from widget controllers.
@@ -68,6 +69,7 @@ class ApiConfigDraft {
     final reasoningEffort = isValidReasoningEffort(values.reasoningEffort)
         ? values.reasoningEffort
         : 'medium';
+    final capabilities = LlmProtocolCapabilities.forProtocol(protocol);
     // Sampling and reasoning omit-toggles are NOT protocol-bound: every
     // protocol accepts temperature/top_p, and the Anthropic and Gemini
     // transports have always honored the flags. Clearing them here was the
@@ -111,6 +113,8 @@ class ApiConfigDraft {
       frequencyPenalty: supportsPenalties ? values.frequencyPenalty : 0.0,
       presencePenalty: supportsPenalties ? values.presencePenalty : 0.0,
       cacheControlTtl: supportsPromptCache ? values.cacheControlTtl : 'off',
+      embeddingUseSame:
+          capabilities.supportsSharedEmbeddings && values.embeddingUseSame,
       // Every first-party protocol normalizes message shape inside its own
       // converter, so the control is offered for custom endpoints only. Clear
       // it elsewhere rather than let a hidden setting reshape the prompt.

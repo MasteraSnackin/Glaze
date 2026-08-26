@@ -1,4 +1,5 @@
 import '../../../../core/models/api_config.dart';
+import '../../../../core/llm/transport/llm_protocol_platform_support.dart';
 import '../models/connection_profiles.dart';
 import '../models/extension_preset.dart';
 
@@ -36,7 +37,19 @@ class ConnectionProfileResolver {
     };
     if (mappedId.isNotEmpty) {
       final match = allConfigs.where((c) => c.id == mappedId).firstOrNull;
-      if (match != null) return match;
+      if (match != null) {
+        return LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+              match.protocol,
+            )
+            ? match
+            : null;
+      }
+    }
+    if (activeFallback == null ||
+        !LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+          activeFallback.protocol,
+        )) {
+      return null;
     }
     return activeFallback;
   }

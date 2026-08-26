@@ -4,6 +4,7 @@ import '../models/api_config.dart';
 import '../models/extra_request_parameter.dart';
 import 'aux_llm_client.dart';
 import 'transport/extra_request_parameters.dart';
+import 'transport/llm_protocol_platform_support.dart';
 
 /// Resolves a Studio API-config slot to an [AuxApiConfig] for auxiliary LLM
 /// calls (cleaner, fact-checker, Ledger).
@@ -42,7 +43,10 @@ class StudioSlotResolver {
     bool? useResponsesApi,
   }) {
     if (apiConfigId.isEmpty) {
-      if (fallback != null) {
+      if (fallback != null &&
+          LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+            fallback.protocol,
+          )) {
         final model = modelOverride.isNotEmpty ? modelOverride : fallback.model;
         debugPrint(
           '[StudioSlotResolver] $errorLabel: apiConfigId is empty — '
@@ -79,6 +83,14 @@ class StudioSlotResolver {
       throw Exception(
         'Studio slot "$errorLabel" not found: apiConfigId "$apiConfigId" '
         'does not match any saved API config',
+      );
+    }
+    if (!LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+      selected.protocol,
+    )) {
+      throw Exception(
+        'Studio slot "$errorLabel" is unavailable on this platform: '
+        'apiConfigId "$apiConfigId"',
       );
     }
     final model = modelOverride.isNotEmpty ? modelOverride : selected.model;

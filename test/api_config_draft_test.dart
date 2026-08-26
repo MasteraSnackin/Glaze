@@ -135,6 +135,39 @@ void main() {
     expect(draft.toConfig(config).useResponsesApi, isTrue);
   });
 
+  test('Codex preserves inactive HTTP fields but cannot share embeddings', () {
+    const config = ApiConfig(
+      id: 'api',
+      providerId: 'openai',
+      protocol: LlmProtocol.codexChatgpt,
+      endpoint: 'https://api.example.test',
+      apiKey: 'preserved-secret',
+      model: 'gpt-5',
+      embeddingEnabled: true,
+      embeddingUseSame: true,
+      embeddingEndpoint: 'https://embeddings.example.test',
+      embeddingApiKey: 'embedding-key',
+      embeddingModel: 'embedding-model',
+    );
+
+    final draft = ApiConfigDraft.fromConfig(config);
+    final mapped = draft.toConfig(config);
+
+    for (final values in [draft.values, mapped]) {
+      // These inactive fields survive a temporary protocol switch so moving
+      // back to an HTTP provider is lossless. Capability-aware validation does
+      // not require them, and the Codex transport ignores them.
+      expect(values.providerId, config.providerId);
+      expect(values.endpoint, config.endpoint);
+      expect(values.apiKey, config.apiKey);
+      expect(values.embeddingEnabled, isTrue);
+      expect(values.embeddingUseSame, isFalse);
+      expect(values.embeddingEndpoint, config.embeddingEndpoint);
+      expect(values.embeddingApiKey, config.embeddingApiKey);
+      expect(values.embeddingModel, config.embeddingModel);
+    }
+  });
+
   test('a legacy JSON preset with the opt-in maps onto the new protocol', () {
     final config = ApiConfig.fromJson(const {
       'id': 'api',

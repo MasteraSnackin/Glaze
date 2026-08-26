@@ -11,6 +11,7 @@ import 'transport/chat_transport.dart';
 import 'transport/chat_transport_request.dart';
 import 'transport/llm_capture_context.dart';
 import 'transport/llm_call_event.dart';
+import 'transport/llm_protocol_capabilities.dart';
 import 'transport/transport_factory.dart';
 
 typedef AuxTransportPicker = ChatTransport Function(String protocol);
@@ -169,7 +170,9 @@ class AuxLlmClient {
     LlmCaptureContext? captureContext,
     AuxRawResponseSink? onRawResponse,
   }) async {
-    if (config.endpoint.isEmpty || config.model.isEmpty) {
+    final capabilities = LlmProtocolCapabilities.forProtocol(config.protocol);
+    if ((capabilities.requiresEndpoint && config.endpoint.isEmpty) ||
+        config.model.isEmpty) {
       throw Exception('Aux API not configured');
     }
     if (messages == null && prompt.isEmpty) {
@@ -234,7 +237,9 @@ class AuxLlmClient {
     bool requestReasoning = false,
     LlmCaptureContext? captureContext,
   }) async {
-    if (config.endpoint.isEmpty || config.model.isEmpty) {
+    final capabilities = LlmProtocolCapabilities.forProtocol(config.protocol);
+    if ((capabilities.requiresEndpoint && config.endpoint.isEmpty) ||
+        config.model.isEmpty) {
       throw Exception('Aux API not configured');
     }
     final runner = AuxRetryRunner(policy: retryPolicy);

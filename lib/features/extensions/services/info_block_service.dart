@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/transport/chat_transport_request.dart';
+import '../../../core/llm/transport/llm_protocol_platform_support.dart';
 import '../../../core/llm/transport/transport_factory.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/models/api_config.dart';
@@ -159,6 +160,14 @@ class InfoBlockService {
     if (apiConfig == null) {
       debugPrint('[InfoBlockService] API config not found: $apiConfigId');
       return (content: null, error: 'API config not found: $apiConfigId');
+    }
+    if (!LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+      apiConfig.protocol,
+    )) {
+      return (
+        content: null,
+        error: 'API config is unavailable on this platform: $apiConfigId',
+      );
     }
 
     if (cancelToken?.isCancelled == true) return (content: null, error: null);

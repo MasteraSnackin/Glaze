@@ -4,6 +4,7 @@ import '../models/api_config.dart';
 import '../models/extra_request_parameter.dart';
 import 'aux_llm_client.dart';
 import 'transport/extra_request_parameters.dart';
+import 'transport/llm_protocol_platform_support.dart';
 
 /// Typed failure for the dedicated card-rewrite model slot: the slot id is
 /// empty (not configured yet) or matches no saved API config. The writer lane
@@ -72,6 +73,14 @@ class CardRewriteSlotResolver {
       throw CardRewriteModelNotConfigured(
         'Card rewrite model slot not found: apiConfigId "$apiConfigId" does '
         'not match any saved API config',
+      );
+    }
+    if (!LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+      selected.protocol,
+    )) {
+      throw CardRewriteModelNotConfigured(
+        'Card rewrite model slot is unavailable on this platform: '
+        'apiConfigId "$apiConfigId"',
       );
     }
     final model = modelOverride.isNotEmpty ? modelOverride : selected.model;

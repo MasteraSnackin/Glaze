@@ -8,6 +8,7 @@ import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/utils/time_helpers.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../image_gen/image_gen_connection_policy.dart';
 import '../../image_gen/image_gen_provider.dart';
 import '../../settings/api_list_provider.dart';
 import '../../image_gen/services/image_tag_markup.dart';
@@ -94,13 +95,17 @@ class ImageGenProcessor {
       final apiList = await _ref.read(apiListProvider.future);
       if (apiList.isEmpty) return;
       final activeId = _ref.read(activeApiPresetIdProvider);
-      apiConfig = activeId != null
-          ? apiList.firstWhere(
-              (c) => c.id == activeId,
-              orElse: () => apiList.first,
-            )
-          : apiList.first;
+      final resolved = resolveAvailableApiConfig(apiList, activeId);
+      if (resolved == null) return;
+      apiConfig = resolved;
     }
+    final effectiveImgGenSettings = applyImageGenProtocolPolicy(
+      imgGenSettings,
+      apiConfig.protocol,
+    );
+    final shareChatConnection =
+        effectiveImgGenSettings.useSameEndpoint &&
+        supportsSharedImageConnection(apiConfig.protocol);
 
     final charRepo = _ref.read(characterRepoProvider);
     final character = await charRepo.getById(_charId);
@@ -128,10 +133,10 @@ class ImageGenProcessor {
     try {
       final updatedContent = await service.processMessageImages(
         text: targetMsg.content,
-        settings: imgGenSettings,
-        llmEndpoint: apiConfig.endpoint,
-        llmApiKey: apiConfig.apiKey,
-        llmModel: apiConfig.model,
+        settings: effectiveImgGenSettings,
+        llmEndpoint: shareChatConnection ? apiConfig.endpoint : '',
+        llmApiKey: shareChatConnection ? apiConfig.apiKey : '',
+        llmModel: shareChatConnection ? apiConfig.model : '',
         character: character,
         persona: persona,
         recentImageContexts: recentContexts,

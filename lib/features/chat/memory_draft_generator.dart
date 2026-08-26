@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/llm/transport/chat_transport_request.dart';
 import '../../core/llm/memory_book_api_config_resolver.dart';
 import '../../core/llm/transport/llm_protocol.dart';
+import '../../core/llm/transport/llm_protocol_capabilities.dart';
 import '../../core/llm/transport/transport_factory.dart';
 import '../../core/models/memory_book.dart';
 import '../../core/models/pipeline_settings.dart';
@@ -67,8 +68,8 @@ class MemoryDraftGenerator {
       useResponsesApi = chatConfig.useResponsesApi;
     }
 
-    final endpointRequired = protocol != LlmProtocol.openrouter;
-    if ((endpointRequired && endpoint.isEmpty) || model.isEmpty) {
+    final capabilities = LlmProtocolCapabilities.forProtocol(protocol);
+    if ((capabilities.requiresEndpoint && endpoint.isEmpty) || model.isEmpty) {
       throw Exception('API not configured for memory generation');
     }
 

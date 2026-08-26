@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../../core/llm/transport/llm_protocol_platform_support.dart';
 import '../../../../../core/models/api_config.dart';
 import '../../../../../shared/theme/app_colors.dart';
 import '../../../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -32,22 +33,29 @@ class ProfilePickerSheet {
             Navigator.of(context, rootNavigator: true).pop();
           },
         ),
-        ...configs.map((cfg) {
-          final name = cfg.name.isNotEmpty ? cfg.name : 'Без имени';
-          return BottomSheetItem(
-            label: name,
-            icon: cfg.id == current
-                ? Icons.radio_button_checked
-                : Icons.radio_button_off,
-            iconColor: cfg.id == current
-                ? context.cs.primary
-                : context.cs.onSurfaceVariant,
-            onTap: () {
-              pendingSelection = cfg.id;
-              Navigator.of(context, rootNavigator: true).pop();
-            },
-          );
-        }),
+        ...configs
+            .where(
+              (config) =>
+                  LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+                    config.protocol,
+                  ),
+            )
+            .map((cfg) {
+              final name = cfg.name.isNotEmpty ? cfg.name : 'Без имени';
+              return BottomSheetItem(
+                label: name,
+                icon: cfg.id == current
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_off,
+                iconColor: cfg.id == current
+                    ? context.cs.primary
+                    : context.cs.onSurfaceVariant,
+                onTap: () {
+                  pendingSelection = cfg.id;
+                  Navigator.of(context, rootNavigator: true).pop();
+                },
+              );
+            }),
       ],
     );
     return pendingSelection;

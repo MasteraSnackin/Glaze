@@ -27,6 +27,7 @@ Glaze is a local, user-friendly AI roleplay chat client. It works with any OpenA
 - **Image Generation** — Generate images from inside the app and wire image output into roleplay flows and extension blocks.
 - **Cloud Sync** — Optional Dropbox and Google Drive sync for moving your local data between devices.
 - **Local-First Storage** — Characters, sessions, presets, API configuration, personas, lorebooks, and extension data all live in a local SQLite database.
+- **Desktop ChatGPT Subscription Support** — On macOS, Windows and Linux, this fork can generate through a ChatGPT subscription using the locally installed Codex CLI. Codex owns browser sign-in and token storage; Glaze's Dart code never reads those OAuth tokens.
 - **Extensions (ExtBlocks)** — Automate post-generation actions: info blocks, image generation, JS scripts, and interactive HTML panels. *(under development)*
 - **Glaze Studio** — A multi-agent pipeline for improving response quality: cleanup, fact-checking, entity tracking, and constraint enforcement. *(under development)*
 
@@ -61,6 +62,25 @@ Download the latest release from the [Releases](../../releases) page.
 
 Backups from **SillyTavern** (`.zip`) can be imported via **Menu → Backups**.
 
+### ChatGPT subscription on desktop
+
+This fork adds **ChatGPT (Codex desktop)** as an API connection type on macOS,
+Windows and Linux. Install or update the
+[Codex CLI](https://developers.openai.com/codex/cli), then select that connection
+type under **Settings → API** and choose **Sign in with ChatGPT**.
+
+Glaze deliberately uses a separate Codex profile, so an existing Codex login is
+not inherited. The first connection therefore requires its own one-time browser
+sign-in. Only a ChatGPT account is accepted: Codex API-key accounts are rejected
+to prevent accidental API billing. Embeddings require a separate embedding
+provider, and OpenAI or Gemini image generation requires a separate image API
+connection. Glaze never reuses preserved HTTP credentials for either feature.
+
+The integration uses the experimental
+[Codex App Server](https://developers.openai.com/codex/app-server). See
+[`docs/BUILD_NOTES.md`](docs/BUILD_NOTES.md) for its isolation model and the
+macOS source-build/App Sandbox trade-off.
+
 ## 🛠️ Development
 
 Built with Flutter, using local SQLite storage, native desktop support, and a sandboxed extension runtime. Powered by Riverpod, Drift/SQLite, Dio, GoRouter, and a WebView-based chat renderer.
@@ -69,12 +89,13 @@ Built with Flutter, using local SQLite storage, native desktop support, and a sa
 
 - [Flutter](https://docs.flutter.dev/get-started/install) 3.44+ (or newer, compatible with Dart 3.12+)
 - A toolchain for the platform you want to build — [Android Studio](https://developer.android.com/studio) for Android, Xcode for iOS/macOS, Visual Studio with the C++ desktop workload for Windows
+- [Codex CLI](https://developers.openai.com/codex/cli) for the optional desktop ChatGPT subscription connection
 - Git
 
 ### 🏗️ Setup
 
 ```bash
-git clone https://github.com/hydall/Glaze.git
+git clone --branch feat/codex-chatgpt-desktop https://github.com/MasteraSnackin/Glaze.git
 cd Glaze
 flutter pub get
 ```

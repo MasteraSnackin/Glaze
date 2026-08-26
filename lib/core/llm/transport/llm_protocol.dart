@@ -39,6 +39,15 @@ class LlmProtocol {
   /// signatures.
   static const String openrouter = 'openrouter';
 
+  /// Local Codex App Server authenticated by Codex's ChatGPT sign-in flow.
+  ///
+  /// Unlike the HTTP protocols above, Codex owns authentication and model
+  /// discovery. Glaze must never ask for or forward an API key while this
+  /// protocol is active. It is recognised in stored settings on every
+  /// platform, while availability is limited separately by
+  /// `LlmProtocolPlatformSupport`.
+  static const String codexChatgpt = 'codex_chatgpt';
+
   static const List<String> all = [
     openai,
     customChatCompletion,
@@ -46,6 +55,7 @@ class LlmProtocol {
     anthropic,
     gemini,
     openrouter,
+    codexChatgpt,
   ];
 
   static const Map<String, String> labels = {
@@ -55,6 +65,7 @@ class LlmProtocol {
     anthropic: 'Anthropic',
     gemini: 'Google Gemini',
     openrouter: 'OpenRouter',
+    codexChatgpt: 'ChatGPT (Codex desktop)',
   };
 
   static bool isValid(String value) => all.contains(value);

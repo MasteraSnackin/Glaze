@@ -2,6 +2,29 @@
 
 Platform/toolchain gotchas and their workarounds. Loaded on demand.
 
+## macOS App Sandbox and the Codex ChatGPT provider
+
+The desktop ChatGPT connection starts the user's installed `codex app-server`
+executable. A macOS App Sandbox build cannot execute an arbitrary CLI from the
+user's home directory or Homebrew installation. This fork therefore omits the
+`com.apple.security.app-sandbox` entitlement from both macOS entitlement files.
+
+That choice is suitable for the project's current direct, source-built macOS
+distribution, but it removes the operating system's application-container
+boundary and is not suitable for a Mac App Store build. The extension iframe
+sandbox and capability checks still apply; they are separate from App Sandbox.
+Do not restore App Sandbox while retaining the external CLI bridge. A future
+sandboxed distribution would need to bundle, sign and update a compatible Codex
+helper inside the application instead.
+
+The Codex process itself is still launched with a Glaze-owned `CODEX_HOME` and
+`CODEX_SQLITE_HOME`, a sanitised environment, no inherited authentication
+variables, an ephemeral thread, read-only filesystem policy, network disabled
+for sandboxed tools during turns, no approvals and no host-provided tools.
+The Codex process itself retains the provider and OAuth network access needed
+for ChatGPT. `--strict-config` makes Codex fail at startup rather than silently
+ignoring an unsupported isolation setting.
+
 ## `path_provider_foundation` + `objective_c` on Windows
 
 **Symptom:** `flutter build windows` fails while compiling a native asset hook.

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/transport/anthropic_chat_transport.dart';
+import 'package:glaze_flutter/core/llm/transport/codex_chat_transport.dart';
 import 'package:glaze_flutter/core/llm/transport/gemini_chat_transport.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_request_dump.dart';
@@ -32,6 +33,7 @@ void main() {
     expect(_inner(LlmProtocol.anthropic), isA<AnthropicChatTransport>());
     expect(_inner(LlmProtocol.gemini), isA<GeminiChatTransport>());
     expect(_inner(LlmProtocol.openrouter), isA<OpenRouterChatTransport>());
+    expect(_inner(LlmProtocol.codexChatgpt), isA<CodexChatTransport>());
   });
 
   test('unknown protocols still fall back to Chat Completions', () {

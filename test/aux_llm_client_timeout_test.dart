@@ -6,6 +6,7 @@ import 'package:glaze_flutter/core/llm/transport/chat_transport.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport_request.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_call_event.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 
 const _config = AuxApiConfig(
   endpoint: 'https://example.test',
@@ -61,6 +62,46 @@ void main() {
   tearDown(() => LlmCallEventCapture.sink = null);
 
   group('AuxLlmClient attempt transport lifetime', () {
+    test('protocols without endpoints reach the selected transport', () async {
+      final protocols = <String>[];
+      final transport = _FakeTransport(({
+        required request,
+        required cancelToken,
+        required onUpdate,
+        required onComplete,
+        required onError,
+      }) async {
+        onComplete?.call('ok', null);
+      });
+      final client = AuxLlmClient(
+        transportPicker: (protocol) {
+          protocols.add(protocol);
+          return transport;
+        },
+      );
+
+      for (final protocol in const [
+        LlmProtocol.openrouter,
+        LlmProtocol.codexChatgpt,
+      ]) {
+        final result = await client.callOnce(
+          config: AuxApiConfig(
+            endpoint: '',
+            apiKey: protocol == LlmProtocol.openrouter ? 'key' : '',
+            model: 'model',
+            protocol: protocol,
+          ),
+          prompt: 'hello',
+          maxTokens: 10,
+          temperature: 0.2,
+          timeoutMs: 1000,
+        );
+        expect(result, 'ok');
+      }
+
+      expect(protocols, [LlmProtocol.openrouter, LlmProtocol.codexChatgpt]);
+    });
+
     test(
       'idle timeout cancels and drains before retry; late completion ignored',
       () async {

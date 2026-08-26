@@ -249,6 +249,26 @@ void main() {
     expect(await service.getSummaryContent('session'), 'generated summary');
   });
 
+  test('accepts a Codex ChatGPT config with no endpoint or key', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    await service.generateSummary(
+      sessionId: 'session',
+      history: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
+      apiConfig: const ApiConfig(
+        id: 'api',
+        model: 'gpt-5',
+        protocol: LlmProtocol.codexChatgpt,
+      ),
+    );
+
+    expect(llm.config?.protocol, LlmProtocol.codexChatgpt);
+    expect(llm.config?.endpoint, isEmpty);
+    expect(llm.config?.apiKey, isEmpty);
+    expect(await service.getSummaryContent('session'), 'generated summary');
+  });
+
   test(
     'rejects incomplete API configuration before making a request',
     () async {

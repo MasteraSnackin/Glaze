@@ -61,6 +61,19 @@ String? resolveReasoningEffort({
         default:
           return null;
       }
+    case LlmProtocol.codexChatgpt:
+      switch (effort) {
+        case 'min':
+          return 'low';
+        case 'max':
+          return 'high';
+        case 'low':
+        case 'medium':
+        case 'high':
+          return effort;
+        default:
+          return null;
+      }
     default:
       switch (effort) {
         case 'min':

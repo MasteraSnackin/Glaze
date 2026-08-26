@@ -5,8 +5,8 @@ import '../models/api_config.dart';
 import '../models/chat_message.dart';
 import 'aux_llm_client.dart';
 import 'macro_engine.dart';
-import 'transport/llm_protocol.dart';
 import 'transport/llm_capture_context.dart';
+import 'transport/llm_protocol_capabilities.dart';
 
 /// Prompt used when a session has no custom summarization prompt. Exposed so
 /// the editor can show it as the placeholder for an empty field.
@@ -107,10 +107,10 @@ class SummaryService {
     MacroContext? macroContext,
     CancelToken? cancelToken,
   }) async {
-    // OpenRouter's transport hardcodes its base URL and ignores the config's
-    // endpoint, so an empty endpoint is legitimate there.
-    final endpointRequired = apiConfig.protocol != LlmProtocol.openrouter;
-    if (endpointRequired && apiConfig.endpoint.isEmpty) {
+    final capabilities = LlmProtocolCapabilities.forProtocol(
+      apiConfig.protocol,
+    );
+    if (capabilities.requiresEndpoint && apiConfig.endpoint.isEmpty) {
       throw Exception('API endpoint not configured');
     }
     if (apiConfig.model.isEmpty) {

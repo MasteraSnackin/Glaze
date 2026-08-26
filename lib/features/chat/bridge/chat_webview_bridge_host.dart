@@ -6,7 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/transport/chat_transport_request.dart';
-import '../../../core/llm/transport/llm_protocol.dart';
+import '../../../core/llm/transport/llm_protocol_capabilities.dart';
 import '../../../core/llm/transport/transport_factory.dart';
 import '../../../core/state/db_provider.dart';
 import '../../extensions/models/connection_profiles.dart';
@@ -155,8 +155,10 @@ class ChatWebViewBridgeHost {
     if (apiConfig == null) {
       throw StateError('No active API config available');
     }
-    final endpointRequired = apiConfig.protocol != LlmProtocol.openrouter;
-    if ((endpointRequired && apiConfig.endpoint.isEmpty) ||
+    final capabilities = LlmProtocolCapabilities.forProtocol(
+      apiConfig.protocol,
+    );
+    if ((capabilities.requiresEndpoint && apiConfig.endpoint.isEmpty) ||
         apiConfig.model.isEmpty) {
       throw StateError('Active API config is incomplete');
     }

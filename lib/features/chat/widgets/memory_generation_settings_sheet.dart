@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/memory_budget.dart';
 import '../../../core/llm/model_fetcher.dart';
+import '../../../core/llm/transport/llm_protocol_platform_support.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../core/services/memory_prompt_presets.dart';
 import '../../../core/state/db_provider.dart';
@@ -1105,7 +1106,16 @@ class _MemoryGenerationSettingsSheetState
 
   Widget _buildConnectionSelector() {
     final configs = ref.watch(apiListProvider).value ?? const [];
-    final selectedExists = configs.any((config) => config.id == _apiConfigId);
+    final availableConfigs = configs
+        .where(
+          (config) => LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+            config.protocol,
+          ),
+        )
+        .toList(growable: false);
+    final selectedExists = availableConfigs.any(
+      (config) => config.id == _apiConfigId,
+    );
     final value = _apiConfigId.isEmpty || selectedExists ? _apiConfigId : '';
     return DropdownButtonFormField<String>(
       initialValue: value,
@@ -1120,7 +1130,7 @@ class _MemoryGenerationSettingsSheetState
           value: '',
           child: Text('studio_slot_use_chat_api'.tr()),
         ),
-        ...configs.map(
+        ...availableConfigs.map(
           (config) => DropdownMenuItem(
             value: config.id,
             child: Text(
@@ -1157,9 +1167,21 @@ class _MemoryGenerationSettingsSheetState
     await ref.read(apiListProvider.future);
     if (!mounted) return;
     final configs = ref.read(apiListProvider).value ?? const [];
+    final selected = configs
+        .where((item) => item.id == _apiConfigId)
+        .firstOrNull;
+    if (selected != null &&
+        !LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(
+          selected.protocol,
+        )) {
+      if (mounted) {
+        GlazeToast.show(context, 'settings_codex_account_desktop_only'.tr());
+      }
+      return;
+    }
     final config = _apiConfigId.isEmpty
         ? ref.read(activeApiConfigProvider)
-        : configs.where((item) => item.id == _apiConfigId).firstOrNull;
+        : selected;
     if (config == null) {
       if (mounted) GlazeToast.show(context, 'settings_no_api_configs'.tr());
       return;

@@ -17,6 +17,7 @@ import '../../../shared/widgets/help_tip.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../image_gen_capabilities.dart';
+import '../image_gen_connection_policy.dart';
 import '../image_gen_models.dart';
 import '../image_gen_provider.dart';
 import '../services/image_gen_connection_service.dart';
@@ -98,19 +99,25 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   /// Probes the provider. Only ever runs from a tap on the status badge — the
   /// sheet never reaches out on its own.
   Future<void> _checkConnection() async {
-    final settings = _settings;
-    if (!settings.enabled) return;
+    if (!_settings.enabled) return;
     final epoch = ++_connectionEpoch;
     setState(() {
       _connectionStatus = ApiConnectionStatus.connecting;
       _connectionError = '';
     });
     final apiConfig = ref.read(activeApiConfigProvider);
+    final settings = apiConfig == null
+        ? _settings
+        : applyImageGenProtocolPolicy(_settings, apiConfig.protocol);
+    final shareChatConnection =
+        settings.useSameEndpoint &&
+        (apiConfig == null ||
+            supportsSharedImageConnection(apiConfig.protocol));
     try {
       await _connectionService.checkConnection(
         settings: settings,
-        llmEndpoint: apiConfig?.endpoint ?? '',
-        llmApiKey: apiConfig?.apiKey ?? '',
+        llmEndpoint: shareChatConnection ? apiConfig?.endpoint ?? '' : '',
+        llmApiKey: shareChatConnection ? apiConfig?.apiKey ?? '' : '',
       );
       if (!mounted || epoch != _connectionEpoch) return;
       setState(() => _connectionStatus = ApiConnectionStatus.connected);
@@ -153,6 +160,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   @override
   Widget build(BuildContext context) {
     final s = _settings;
+    final activeApiConfig = ref.watch(activeApiConfigProvider);
 
     return SheetView(
       titleWidget: Row(
@@ -172,7 +180,9 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       fitContent: false,
       scrollController: _scrollController,
       enableHeaderBlur: false,
-      body: s.enabled ? _buildBody(context, s) : _buildDisabledPlaceholder(),
+      body: s.enabled
+          ? _buildBody(context, s, activeApiConfig)
+          : _buildDisabledPlaceholder(),
     );
   }
 
@@ -205,7 +215,11 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     );
   }
 
-  Widget _buildBody(BuildContext context, ImageGenSettings s) {
+  Widget _buildBody(
+    BuildContext context,
+    ImageGenSettings s,
+    ApiConfig? activeApiConfig,
+  ) {
     return Builder(
       builder: (context) => SingleChildScrollView(
         controller: _scrollController,
@@ -226,7 +240,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
             ),
             MenuGroup(
               header: 'imggen_connection'.tr(),
-              items: _buildConnectionFields(s),
+              items: _buildConnectionFields(s, activeApiConfig),
             ),
             MenuGroup(header: 'Model', items: _buildModelFields(s)),
             if (_modelFetchError.isNotEmpty)
@@ -374,7 +388,10 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     );
   }
 
-  List<Widget> _buildConnectionFields(ImageGenSettings s) {
+  List<Widget> _buildConnectionFields(
+    ImageGenSettings s,
+    ApiConfig? activeApiConfig,
+  ) {
     switch (s.apiType) {
       case ImageGenApiType.naistera:
         return buildNaisteraConnectionFields(s, _update);
@@ -392,7 +409,13 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         return buildA1111ConnectionFields(s, _update);
       case ImageGenApiType.openai:
       case ImageGenApiType.gemini:
-        return buildOpenaiConnectionFields(s, _update);
+        return buildOpenaiConnectionFields(
+          s,
+          _update,
+          allowSharedEndpoint:
+              activeApiConfig == null ||
+              supportsSharedImageConnection(activeApiConfig.protocol),
+        );
     }
   }
 
@@ -498,6 +521,13 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   /// OpenAI and Gemini paths, filtered listings for OpenRouter and Electron
   /// Hub, and loaded checkpoints for a local AUTOMATIC1111 server.
   Future<List<String>> _fetchModelsForProvider(ApiConfig? apiConfig) {
+    final settings = apiConfig == null
+        ? _settings
+        : applyImageGenProtocolPolicy(_settings, apiConfig.protocol);
+    final shareChatConnection =
+        settings.useSameEndpoint &&
+        (apiConfig == null ||
+            supportsSharedImageConnection(apiConfig.protocol));
     switch (_settings.apiType) {
       case ImageGenApiType.openrouter:
         return _connectionService.fetchOpenRouterModels(_settings);
@@ -514,9 +544,9 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       case ImageGenApiType.routmy:
       case ImageGenApiType.ruRoutmy:
         return _connectionService.fetchOpenAiModels(
-          settings: _settings,
-          llmEndpoint: apiConfig?.endpoint ?? '',
-          llmApiKey: apiConfig?.apiKey ?? '',
+          settings: settings,
+          llmEndpoint: shareChatConnection ? apiConfig?.endpoint ?? '' : '',
+          llmApiKey: shareChatConnection ? apiConfig?.apiKey ?? '' : '',
         );
     }
   }
