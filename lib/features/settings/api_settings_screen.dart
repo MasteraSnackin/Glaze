@@ -527,6 +527,35 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     }
   }
 
+  Future<void> _resetCodexAuthentication() async {
+    if (!_isCodex ||
+        !LlmProtocolPlatformSupport.isAvailableOnCurrentPlatform(_protocol)) {
+      return;
+    }
+    final requestId = ++_codexAccountRequestId;
+    setState(() => _codexAccountState = _CodexAccountState.checking);
+    try {
+      await _codexAccountService.resetAuthentication();
+      if (!mounted || requestId != _codexAccountRequestId || !_isCodex) return;
+      setState(() {
+        _codexAccountState = _CodexAccountState.signedOut;
+        _codexPlanType = null;
+      });
+      GlazeToast.show(context, 'settings_codex_reset_complete'.tr());
+    } catch (error) {
+      if (!mounted || requestId != _codexAccountRequestId || !_isCodex) return;
+      setState(() {
+        _codexAccountState = _CodexAccountState.failed;
+        _codexPlanType = null;
+      });
+      GlazeErrorDialog.show(
+        context,
+        error,
+        prefix: 'settings_codex_reset_failed'.tr(),
+      );
+    }
+  }
+
   String get _codexAccountStatusText {
     return switch (_codexAccountState) {
       _CodexAccountState.idle ||
@@ -553,36 +582,53 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         _codexAccountState == _CodexAccountState.checking ||
         _codexAccountState == _CodexAccountState.signingIn;
     final signedIn = _codexAccountState == _CodexAccountState.signedIn;
-    return MenuItem(
-      key: const ValueKey('codex-chatgpt-account'),
-      icon: Icons.account_circle_outlined,
-      label: 'settings_codex_account'.tr(),
-      subtitle:
-          '$_codexAccountStatusText\n${'settings_codex_account_privacy'.tr()}',
-      trailing: busy
-          ? const SizedBox(width: 18, height: 18, child: GlazeSpinner())
-          : Icon(
-              signedIn ? Icons.refresh_rounded : Icons.login_rounded,
-              color: context.cs.onSurfaceVariant,
-              size: 20,
-            ),
-      onTap: () {
-        switch (_codexAccountState) {
-          case _CodexAccountState.checking ||
-              _CodexAccountState.signingIn ||
-              _CodexAccountState.desktopOnly:
-            return;
-          case _CodexAccountState.signedOut || _CodexAccountState.apiKeyAccount:
-            unawaited(_signInToCodexChatGpt());
-            return;
-          case _CodexAccountState.idle ||
-              _CodexAccountState.signedIn ||
-              _CodexAccountState.unavailable ||
-              _CodexAccountState.failed:
-            unawaited(_refreshCodexAccount());
-            return;
-        }
-      },
+    final canReset =
+        _codexAccountState == _CodexAccountState.signedIn ||
+        _codexAccountState == _CodexAccountState.apiKeyAccount ||
+        _codexAccountState == _CodexAccountState.failed;
+    return Column(
+      children: [
+        MenuItem(
+          key: const ValueKey('codex-chatgpt-account'),
+          icon: Icons.account_circle_outlined,
+          label: 'settings_codex_account'.tr(),
+          subtitle:
+              '$_codexAccountStatusText\n${'settings_codex_account_privacy'.tr()}',
+          trailing: busy
+              ? const SizedBox(width: 18, height: 18, child: GlazeSpinner())
+              : Icon(
+                  signedIn ? Icons.refresh_rounded : Icons.login_rounded,
+                  color: context.cs.onSurfaceVariant,
+                  size: 20,
+                ),
+          onTap: () {
+            switch (_codexAccountState) {
+              case _CodexAccountState.checking ||
+                  _CodexAccountState.signingIn ||
+                  _CodexAccountState.desktopOnly:
+                return;
+              case _CodexAccountState.signedOut ||
+                  _CodexAccountState.apiKeyAccount:
+                unawaited(_signInToCodexChatGpt());
+                return;
+              case _CodexAccountState.idle ||
+                  _CodexAccountState.signedIn ||
+                  _CodexAccountState.unavailable ||
+                  _CodexAccountState.failed:
+                unawaited(_refreshCodexAccount());
+                return;
+            }
+          },
+        ),
+        if (canReset)
+          MenuItem(
+            key: const ValueKey('codex-chatgpt-reset'),
+            icon: Icons.logout_rounded,
+            label: 'settings_codex_reset'.tr(),
+            subtitle: 'settings_codex_reset_desc'.tr(),
+            onTap: () => unawaited(_resetCodexAuthentication()),
+          ),
+      ],
     );
   }
 

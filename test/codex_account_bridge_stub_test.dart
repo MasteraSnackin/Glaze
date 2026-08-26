@@ -28,6 +28,16 @@ void main() {
           ),
         ),
       );
+      await expectLater(
+        client.resetAuthentication(),
+        throwsA(
+          isA<CodexSettingsException>().having(
+            (error) => error.kind,
+            'kind',
+            CodexSettingsFailureKind.unsupportedPlatform,
+          ),
+        ),
+      );
       var openedBrowser = false;
       await expectLater(
         client.signInWithChatGpt(

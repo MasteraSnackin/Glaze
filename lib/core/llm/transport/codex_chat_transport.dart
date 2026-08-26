@@ -12,6 +12,11 @@ import 'codex_app_server_client.dart';
 import 'codex_prompt_adapter.dart';
 import 'llm_protocol.dart';
 
+typedef CodexTurnWorkingDirectoryFactory = Future<Directory> Function();
+
+Future<Directory> defaultCodexTurnWorkingDirectoryFactory() =>
+    CodexIsolatedHome.createTurnWorkingDirectory();
+
 /// Desktop ChatGPT-subscription transport backed by local Codex App Server.
 ///
 /// Authentication is owned by Codex inside Glaze's isolated CODEX_HOME. The
@@ -22,16 +27,20 @@ class CodexChatTransport implements ChatTransport {
     CodexSessionFactory? sessionFactory,
     CodexAccountService? accountService,
     this.setupRequestTimeout = const Duration(seconds: 30),
+    CodexTurnWorkingDirectoryFactory? workingDirectoryFactory,
   }) : _sessionFactory = sessionFactory ?? defaultCodexSessionFactory,
        _accountService =
            accountService ??
            CodexAccountService(
              sessionFactory: sessionFactory ?? defaultCodexSessionFactory,
            ),
+       _workingDirectoryFactory =
+           workingDirectoryFactory ?? defaultCodexTurnWorkingDirectoryFactory,
        assert(setupRequestTimeout > Duration.zero);
 
   final CodexSessionFactory _sessionFactory;
   final CodexAccountService _accountService;
+  final CodexTurnWorkingDirectoryFactory _workingDirectoryFactory;
   final Duration setupRequestTimeout;
 
   static const String _baseInstructions = '''
@@ -51,6 +60,10 @@ Never call or request a tool, shell command, file operation, network operation, 
     ChatTransportOnError? onError,
   }) async {
     var callbackSettled = false;
+    Object? pendingError;
+    String? completedText;
+    String? completedReasoning;
+    String? completedRawResponse;
     CodexAppServerSession? session;
     StreamSubscription<CodexAppServerNotification>? notificationSubscription;
     Directory? workspace;
@@ -70,8 +83,31 @@ Never call or request a tool, shell command, file operation, network operation, 
         );
       }
 
-      workspace = await Directory.systemTemp.createTemp('glaze-codex-turn-');
-      session = await _sessionFactory(workingDirectory: workspace.path);
+      workspace = await _workingDirectoryFactory();
+      final startupTimeout = Completer<void>();
+      var startupTimedOut = false;
+      final userCancellation = cancelToken?.whenCancel.then<void>((_) {});
+      final startupCancellation = CodexStartupCancellation(
+        isCancelled: () => startupTimedOut || cancelToken?.isCancelled == true,
+        whenCancelled: userCancellation == null
+            ? startupTimeout.future
+            : Future.any(<Future<void>>[
+                startupTimeout.future,
+                userCancellation,
+              ]),
+      );
+      final sessionFuture = _sessionFactory(
+        workingDirectory: workspace.path,
+        startupCancellation: startupCancellation,
+      );
+      session = await _awaitSessionStart(
+        sessionFuture,
+        cancelToken,
+        onTimeout: () {
+          startupTimedOut = true;
+          if (!startupTimeout.isCompleted) startupTimeout.complete();
+        },
+      );
       await _awaitSetupRequest(
         'account verification',
         _accountService.requireChatGpt(session),
@@ -82,7 +118,13 @@ Never call or request a tool, shell command, file operation, network operation, 
       final prepared = CodexPromptAdapter.prepare(request.messages);
       final threadParams = <String, dynamic>{
         if (request.model.trim().isNotEmpty) 'model': request.model.trim(),
+        'modelProvider': CodexIsolationPolicy.provider,
+        'allowProviderModelFallback': false,
         'cwd': workspace.path,
+        'environments': <Object>[],
+        'runtimeWorkspaceRoots': <Object>[],
+        'selectedCapabilityRoots': <Object>[],
+        'dynamicTools': <Object>[],
         'approvalPolicy': 'never',
         'sandbox': 'read-only',
         'ephemeral': true,
@@ -97,6 +139,13 @@ Never call or request a tool, shell command, file operation, network operation, 
       final thread = rawThread is Map
           ? Map<String, dynamic>.from(rawThread)
           : <String, dynamic>{};
+      if (threadResponse['modelProvider'] != CodexIsolationPolicy.provider ||
+          thread['modelProvider'] != CodexIsolationPolicy.provider) {
+        throw const CodexIsolationException(
+          'Codex did not preserve OpenAI as the thread provider. Generation '
+          'was stopped before any conversation content was sent.',
+        );
+      }
       for (final instructionSources in <Object?>[
         threadResponse['instructionSources'],
         thread['instructionSources'],
@@ -112,6 +161,7 @@ Never call or request a tool, shell command, file operation, network operation, 
       }
       final effectiveSandbox = _map(threadResponse['sandbox']);
       final networkAccess = effectiveSandbox?['networkAccess'];
+      final runtimeWorkspaceRoots = threadResponse['runtimeWorkspaceRoots'];
       if (threadResponse['approvalPolicy'] != 'never') {
         throw const CodexAppServerException(
           'Codex did not preserve the required never-approve policy.',
@@ -121,6 +171,11 @@ Never call or request a tool, shell command, file operation, network operation, 
           (networkAccess != null && networkAccess != false)) {
         throw const CodexAppServerException(
           'Codex did not preserve the required read-only, offline sandbox.',
+        );
+      }
+      if (runtimeWorkspaceRoots is! List || runtimeWorkspaceRoots.isNotEmpty) {
+        throw const CodexAppServerException(
+          'Codex did not preserve the empty runtime workspace boundary.',
         );
       }
       final threadId = thread['id'];
@@ -167,6 +222,8 @@ Never call or request a tool, shell command, file operation, network operation, 
       final turnParams = <String, dynamic>{
         'threadId': threadId,
         'input': prepared.turnInput,
+        'environments': <Object>[],
+        'runtimeWorkspaceRoots': <Object>[],
         'approvalPolicy': 'never',
         'sandboxPolicy': <String, dynamic>{
           'type': 'readOnly',
@@ -252,40 +309,58 @@ Never call or request a tool, shell command, file operation, network operation, 
           );
       }
 
-      callbackSettled = true;
-      onComplete?.call(
-        outcome.text,
-        outcome.reasoning.isEmpty ? null : outcome.reasoning,
-        rawResponseJson: jsonEncode(<String, dynamic>{
-          'object': 'codex.app_server.completion',
-          'thread_id': threadId,
-          'turn_id': turnId,
-          'status': outcome.status,
-          'output_text': outcome.text,
-          if (outcome.reasoning.isNotEmpty) 'reasoning': outcome.reasoning,
-          if (outcome.tokenUsage != null) 'token_usage': outcome.tokenUsage,
-        }),
-      );
+      completedText = outcome.text;
+      completedReasoning = outcome.reasoning.isEmpty ? null : outcome.reasoning;
+      completedRawResponse = jsonEncode(<String, dynamic>{
+        'object': 'codex.app_server.completion',
+        'thread_id': threadId,
+        'turn_id': turnId,
+        'status': outcome.status,
+        'output_text': outcome.text,
+        if (outcome.reasoning.isNotEmpty) 'reasoning': outcome.reasoning,
+        if (outcome.tokenUsage != null) 'token_usage': outcome.tokenUsage,
+      });
     } catch (error) {
       final cancellationError = cancelToken?.isCancelled == true
           ? cancelToken?.cancelError
           : null;
-      reportError(cancellationError ?? error);
+      pendingError = cancellationError ?? error;
     } finally {
-      await notificationSubscription?.cancel();
+      try {
+        await notificationSubscription?.cancel();
+      } catch (error) {
+        pendingError = error;
+      }
       try {
         await session?.close();
-      } catch (_) {
-        // Completion and cancellation already carry the actionable result.
+      } catch (error) {
+        // Process shutdown is part of the isolation boundary. Never report a
+        // successful completion or ordinary cancellation if it was not
+        // verified.
+        pendingError = error;
       }
       if (workspace != null) {
         try {
           await workspace.delete(recursive: true);
-        } catch (_) {
-          // The OS will eventually clear its temporary directory.
+        } catch (error) {
+          pendingError ??= CodexIsolationException(
+            'Glaze could not remove its private Codex turn workspace: '
+            '${workspace.path}',
+          );
         }
       }
     }
+
+    if (pendingError != null) {
+      reportError(pendingError);
+      return;
+    }
+    callbackSettled = true;
+    onComplete?.call(
+      completedText!,
+      completedReasoning,
+      rawResponseJson: completedRawResponse,
+    );
   }
 
   @override
@@ -320,15 +395,49 @@ Never call or request a tool, shell command, file operation, network operation, 
   Future<T> _awaitSetupRequest<T>(
     String operation,
     Future<T> request,
-    CancelToken? cancelToken,
-  ) {
+    CancelToken? cancelToken, {
+    void Function()? onTimeout,
+  }) {
     final bounded = request.timeout(
       setupRequestTimeout,
-      onTimeout: () => throw CodexAppServerException(
-        'Codex App Server did not respond to $operation in time.',
-      ),
+      onTimeout: () {
+        onTimeout?.call();
+        throw CodexAppServerException(
+          'Codex App Server did not respond to $operation in time.',
+        );
+      },
     );
     return _cancelAware(bounded, cancelToken);
+  }
+
+  Future<CodexAppServerSession> _awaitSessionStart(
+    Future<CodexAppServerSession> start,
+    CancelToken? cancelToken, {
+    required void Function() onTimeout,
+  }) async {
+    var claimed = false;
+    try {
+      final session = await _awaitSetupRequest(
+        'process startup',
+        start,
+        cancelToken,
+        onTimeout: onTimeout,
+      );
+      claimed = true;
+      return session;
+    } finally {
+      if (!claimed) {
+        // Future.any cannot cancel Process.start. Retain ownership of a late
+        // session and close it as soon as startup finishes, so cancellation or
+        // timeout cannot orphan a verified App Server process.
+        unawaited(
+          start.then<void>(
+            (lateSession) => lateSession.close(),
+            onError: (Object _, StackTrace _) {},
+          ),
+        );
+      }
+    }
   }
 
   // Callers own first-chunk/idle timeout semantics through CancelToken. This

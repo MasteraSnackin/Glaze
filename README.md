@@ -27,7 +27,7 @@ Glaze is a local, user-friendly AI roleplay chat client. It works with any OpenA
 - **Image Generation** — Generate images from inside the app and wire image output into roleplay flows and extension blocks.
 - **Cloud Sync** — Optional Dropbox and Google Drive sync for moving your local data between devices.
 - **Local-First Storage** — Characters, sessions, presets, API configuration, personas, lorebooks, and extension data all live in a local SQLite database.
-- **Desktop ChatGPT Subscription Support** — On macOS, Windows and Linux, this fork can generate through a ChatGPT subscription using the locally installed Codex CLI. Codex owns browser sign-in and token storage; Glaze's Dart code never reads those OAuth tokens.
+- **Desktop ChatGPT Subscription Support** — Windows and Linux releases, plus local macOS Debug/Profile builds, can generate through a ChatGPT subscription using a native Codex executable. Codex owns browser sign-in and token storage; Glaze's Dart code never reads those OAuth tokens.
 - **Extensions (ExtBlocks)** — Automate post-generation actions: info blocks, image generation, JS scripts, and interactive HTML panels. *(under development)*
 - **Glaze Studio** — A multi-agent pipeline for improving response quality: cleanup, fact-checking, entity tracking, and constraint enforcement. *(under development)*
 
@@ -64,10 +64,16 @@ Backups from **SillyTavern** (`.zip`) can be imported via **Menu → Backups**.
 
 ### ChatGPT subscription on desktop
 
-This fork adds **ChatGPT (Codex desktop)** as an API connection type on macOS,
-Windows and Linux. Install or update the
-[Codex CLI](https://developers.openai.com/codex/cli), then select that connection
-type under **Settings → API** and choose **Sign in with ChatGPT**.
+This fork adds **ChatGPT (Codex desktop)** as an API connection type in Windows
+and Linux releases and in local macOS Debug/Profile builds. macOS Release keeps
+App Sandbox enabled and does not offer this connection, because a sandboxed app
+cannot launch a user-installed CLI. Install a native
+[Codex CLI](https://developers.openai.com/codex/cli) executable at version
+**0.147.0 or 0.149.0**, then select the connection under **Settings → API** and
+choose **Sign in with ChatGPT**. These are the two audited releases; Glaze
+rejects older and newer versions rather than assuming protocol compatibility.
+Script and npm wrappers such as `codex.cmd` are rejected on every platform so
+Glaze owns the native App Server process it must stop.
 
 Glaze deliberately uses a separate Codex profile, so an existing Codex login is
 not inherited. The first connection therefore requires its own one-time browser
@@ -76,10 +82,18 @@ to prevent accidental API billing. Embeddings require a separate embedding
 provider, and OpenAI or Gemini image generation requires a separate image API
 connection. Glaze never reuses preserved HTTP credentials for either feature.
 
+Only plan identifiers audited in Codex 0.147.0 and 0.149.0 are accepted: Free,
+Go, Plus, Pro, Prolite, Team and the two self-serve business variants. Missing,
+unknown and managed Business, Enterprise or Education plan types fail closed;
+an unsupported login is cleared from the isolated profile. The model picker
+uses a safety-restricted derivative of the audited Codex 0.147.0 catalogue. It
+is not refreshed before verification, may include a model unavailable to a
+particular plan, and must be reviewed in the fork before new models appear.
+
 The integration uses the experimental
 [Codex App Server](https://developers.openai.com/codex/app-server). See
-[`docs/BUILD_NOTES.md`](docs/BUILD_NOTES.md) for its isolation model and the
-macOS source-build/App Sandbox trade-off.
+[`docs/BUILD_NOTES.md`](docs/BUILD_NOTES.md) for its isolation model and exact
+macOS build boundary.
 
 ## 🛠️ Development
 

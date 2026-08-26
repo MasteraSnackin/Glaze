@@ -23,4 +23,7 @@ class _UnsupportedCodexSettingsAccountClient
   Future<CodexSettingsAccount> signInWithChatGpt({
     required Future<bool> Function(Uri uri) openBrowser,
   }) => Future.error(_error);
+
+  @override
+  Future<void> resetAuthentication() => Future.error(_error);
 }

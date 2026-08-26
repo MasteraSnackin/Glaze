@@ -36,6 +36,10 @@ class _IoCodexSettingsAccountClient implements CodexSettingsAccountClient {
     );
   });
 
+  @override
+  Future<void> resetAuthentication() =>
+      _guard(CodexIsolatedHome.clearAuthentication);
+
   Future<T> _guard<T>(Future<T> Function() action) async {
     try {
       return await action();

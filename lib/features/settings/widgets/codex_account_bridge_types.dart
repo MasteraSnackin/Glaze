@@ -34,4 +34,9 @@ abstract interface class CodexSettingsAccountClient {
   Future<CodexSettingsAccount> signInWithChatGpt({
     required Future<bool> Function(Uri uri) openBrowser,
   });
+
+  /// Deletes only the file-backed credential in Glaze's isolated Codex home.
+  /// This does not require App Server to start, so it remains a recovery path
+  /// when a workspace-plan transition blocks startup.
+  Future<void> resetAuthentication();
 }

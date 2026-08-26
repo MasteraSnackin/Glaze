@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,12 +25,16 @@ class _FakeCodexSession implements CodexAppServerSession {
 
   String? accountType = 'chatgpt';
   String? planType = 'plus';
+  bool requiresOpenaiAuth = true;
+  String topLevelModelProvider = 'openai';
+  String nestedModelProvider = 'openai';
   bool ephemeral = true;
   String approvalPolicy = 'never';
   Map<String, dynamic> sandbox = const <String, dynamic>{
     'type': 'readOnly',
     'networkAccess': false,
   };
+  Object runtimeWorkspaceRoots = const <Object>[];
   List<Object> instructionSources = const [];
   List<Object> nestedInstructionSources = const [];
   Object? instructionSourcesOverride;
@@ -39,6 +44,7 @@ class _FakeCodexSession implements CodexAppServerSession {
   bool malformedThreadRead = false;
   void Function(_FakeCodexSession session)? onTurnStart;
   bool closed = false;
+  Object? closeError;
 
   @override
   Stream<CodexAppServerNotification> get notifications => _notifications.stream;
@@ -59,6 +65,7 @@ class _FakeCodexSession implements CodexAppServerSession {
     switch (method) {
       case 'account/read':
         return <String, dynamic>{
+          'requiresOpenaiAuth': requiresOpenaiAuth,
           'account': accountType == null
               ? null
               : <String, dynamic>{
@@ -70,14 +77,17 @@ class _FakeCodexSession implements CodexAppServerSession {
         final blocked = blockedThreadStart;
         if (blocked != null) return blocked.future;
         return <String, dynamic>{
+          'modelProvider': topLevelModelProvider,
           'thread': <String, dynamic>{
             'id': 'thread-1',
+            'modelProvider': nestedModelProvider,
             'ephemeral': ephemeral,
             if (nestedInstructionSources.isNotEmpty)
               'instructionSources': nestedInstructionSources,
           },
           'approvalPolicy': approvalPolicy,
           'sandbox': Map<String, dynamic>.from(sandbox),
+          'runtimeWorkspaceRoots': runtimeWorkspaceRoots,
           'instructionSources':
               instructionSourcesOverride ?? instructionSources,
         };
@@ -123,6 +133,7 @@ class _FakeCodexSession implements CodexAppServerSession {
     if (closed) return;
     closed = true;
     await _notifications.close();
+    if (closeError != null) throw closeError!;
   }
 }
 
@@ -176,10 +187,16 @@ Future<_RunResult> _run(
 }) async {
   final result = _RunResult();
   final transport = CodexChatTransport(
-    sessionFactory: ({String? workingDirectory}) async {
-      onCreateSession?.call(workingDirectory);
-      return session;
-    },
+    workingDirectoryFactory: () =>
+        Directory.systemTemp.createTemp('glaze-codex-turn-test-'),
+    sessionFactory:
+        ({
+          String? workingDirectory,
+          CodexStartupCancellation? startupCancellation,
+        }) async {
+          onCreateSession?.call(workingDirectory);
+          return session;
+        },
     setupRequestTimeout: setupRequestTimeout,
   );
   await transport.stream(
@@ -337,7 +354,13 @@ void main() {
           (request) => request.method == 'thread/start',
         );
         expect(threadStart.params['model'], 'gpt-test');
+        expect(threadStart.params['modelProvider'], 'openai');
+        expect(threadStart.params['allowProviderModelFallback'], isFalse);
         expect(threadStart.params['cwd'], workingDirectory);
+        expect(threadStart.params['environments'], isEmpty);
+        expect(threadStart.params['runtimeWorkspaceRoots'], isEmpty);
+        expect(threadStart.params['selectedCapabilityRoots'], isEmpty);
+        expect(threadStart.params['dynamicTools'], isEmpty);
         expect(threadStart.params['approvalPolicy'], 'never');
         expect(threadStart.params['sandbox'], 'read-only');
         expect(threadStart.params['ephemeral'], isTrue);
@@ -363,6 +386,8 @@ void main() {
           'networkAccess': false,
         });
         expect(turnStart.params['summary'], 'auto');
+        expect(turnStart.params['environments'], isEmpty);
+        expect(turnStart.params['runtimeWorkspaceRoots'], isEmpty);
         expect(turnStart.params['effort'], 'high');
         expect(turnStart.params['input'], [
           {'type': 'text', 'text': 'Continue', 'text_elements': <Object>[]},
@@ -481,6 +506,101 @@ void main() {
       expect(session.closed, isTrue);
     });
 
+    test(
+      'closes a session that finishes starting after cancellation',
+      () async {
+        final session = _FakeCodexSession();
+        final started = Completer<CodexAppServerSession>();
+        final token = CancelToken();
+        Object? error;
+        final transport = CodexChatTransport(
+          workingDirectoryFactory: () =>
+              Directory.systemTemp.createTemp('glaze-codex-turn-test-'),
+          sessionFactory:
+              ({
+                String? workingDirectory,
+                CodexStartupCancellation? startupCancellation,
+              }) => started.future,
+          setupRequestTimeout: const Duration(seconds: 1),
+        );
+
+        final pending = transport.stream(
+          request: _request(),
+          cancelToken: token,
+          onError: (value) => error = value,
+        );
+        await Future<void>.delayed(Duration.zero);
+        token.cancel('cancel during startup');
+        await pending;
+
+        expect(error, isA<DioException>());
+        expect(session.closed, isFalse);
+        started.complete(session);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        expect(session.closed, isTrue);
+      },
+    );
+
+    test('propagates the setup timeout into process startup', () async {
+      final started = Completer<CodexAppServerSession>();
+      final session = _FakeCodexSession();
+      CodexStartupCancellation? receivedCancellation;
+      Object? error;
+      final transport = CodexChatTransport(
+        workingDirectoryFactory: () =>
+            Directory.systemTemp.createTemp('glaze-codex-turn-test-'),
+        sessionFactory:
+            ({
+              String? workingDirectory,
+              CodexStartupCancellation? startupCancellation,
+            }) {
+              receivedCancellation = startupCancellation;
+              return started.future;
+            },
+        setupRequestTimeout: const Duration(milliseconds: 20),
+      );
+
+      await transport.stream(
+        request: _request(),
+        onError: (value) => error = value,
+      );
+
+      expect(error, isA<CodexAppServerException>());
+      expect(error.toString(), contains('process startup'));
+      expect(receivedCancellation, isNotNull);
+      expect(receivedCancellation!.isCancelled(), isTrue);
+      await receivedCancellation!.whenCancelled;
+
+      started.complete(session);
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(session.closed, isTrue);
+    });
+
+    test('does not report completion when verified shutdown fails', () async {
+      final shutdownError = CodexIsolationException(
+        'Codex shutdown was not verified.',
+      );
+      final session = _FakeCodexSession()..closeError = shutdownError;
+      session.onTurnStart = (value) {
+        _emitStarted(value);
+        _emitAgentCompleted(
+          value,
+          id: 'answer-1',
+          phase: 'final_answer',
+          text: 'Answer',
+        );
+        _emitTurnCompleted(value);
+      };
+
+      final result = await _run(session);
+
+      expect(result.text, isNull);
+      expect(result.error, same(shutdownError));
+      expect(session.closed, isTrue);
+    });
+
     test('rejects any external instruction source before generation', () async {
       final session = _FakeCodexSession()
         ..instructionSources = const ['/outside/AGENTS.md'];
@@ -580,6 +700,38 @@ void main() {
       );
     });
 
+    test('rejects non-empty effective runtime workspace roots', () async {
+      final session = _FakeCodexSession()
+        ..runtimeWorkspaceRoots = const <Object>['/outside'];
+
+      final result = await _run(session);
+
+      expect(result.error, isA<CodexAppServerException>());
+      expect(result.error.toString(), contains('workspace boundary'));
+      expect(
+        session.requests.any(
+          (request) => request.method == 'thread/inject_items',
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects malformed effective runtime workspace roots', () async {
+      final session = _FakeCodexSession()
+        ..runtimeWorkspaceRoots = <String, Object>{'unexpected': true};
+
+      final result = await _run(session);
+
+      expect(result.error, isA<CodexAppServerException>());
+      expect(result.error.toString(), contains('workspace boundary'));
+      expect(
+        session.requests.any(
+          (request) => request.method == 'thread/inject_items',
+        ),
+        isFalse,
+      );
+    });
+
     test('rejects malformed effective network access metadata', () async {
       final session = _FakeCodexSession()
         ..sandbox = <String, dynamic>{
@@ -613,6 +765,53 @@ void main() {
         expect(session.closed, isTrue);
       },
     );
+
+    test(
+      'rejects an account response that does not require OpenAI auth',
+      () async {
+        final session = _FakeCodexSession()..requiresOpenaiAuth = false;
+
+        final result = await _run(session);
+
+        expect(result.error, isA<CodexIsolationException>());
+        expect(session.requests.map((request) => request.method), [
+          'account/read',
+        ]);
+        expect(session.closed, isTrue);
+      },
+    );
+
+    test('rejects a non-OpenAI top-level thread provider', () async {
+      final session = _FakeCodexSession()
+        ..topLevelModelProvider = 'custom-provider';
+
+      final result = await _run(session);
+
+      expect(result.error, isA<CodexIsolationException>());
+      expect(result.error.toString(), contains('thread provider'));
+      expect(
+        session.requests.any(
+          (request) => request.method == 'thread/inject_items',
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects a non-OpenAI nested thread provider', () async {
+      final session = _FakeCodexSession()
+        ..nestedModelProvider = 'custom-provider';
+
+      final result = await _run(session);
+
+      expect(result.error, isA<CodexIsolationException>());
+      expect(result.error.toString(), contains('thread provider'));
+      expect(
+        session.requests.any(
+          (request) => request.method == 'thread/inject_items',
+        ),
+        isFalse,
+      );
+    });
 
     test('uses thread/read when 0.147 omits turn/completed', () async {
       final session = _FakeCodexSession();

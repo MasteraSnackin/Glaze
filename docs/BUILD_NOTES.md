@@ -6,24 +6,99 @@ Platform/toolchain gotchas and their workarounds. Loaded on demand.
 
 The desktop ChatGPT connection starts the user's installed `codex app-server`
 executable. A macOS App Sandbox build cannot execute an arbitrary CLI from the
-user's home directory or Homebrew installation. This fork therefore omits the
-`com.apple.security.app-sandbox` entitlement from both macOS entitlement files.
+user's home directory or Homebrew installation. `Release.entitlements`
+therefore retains App Sandbox, and release-mode code hides and rejects this
+provider on macOS. The local Debug and Profile configurations use
+`DebugProfile.entitlements`, which is deliberately unsandboxed so a developer
+running the source checkout can launch the external CLI. Those builds are for
+local development, not distribution. A distributable macOS implementation
+would need a compatible helper bundled and signed inside the application.
 
-That choice is suitable for the project's current direct, source-built macOS
-distribution, but it removes the operating system's application-container
-boundary and is not suitable for a Mac App Store build. The extension iframe
-sandbox and capability checks still apply; they are separate from App Sandbox.
-Do not restore App Sandbox while retaining the external CLI bridge. A future
-sandboxed distribution would need to bundle, sign and update a compatible Codex
-helper inside the application instead.
+Windows and Linux releases, plus local macOS Debug/Profile builds, accept
+exactly the native Codex CLI 0.147.0 and 0.149.0 executables. Script and npm
+wrappers are rejected on every platform. Each process receives a Glaze-owned
+`CODEX_HOME` and `CODEX_SQLITE_HOME`, a small environment allowlist with no
+inherited authentication, proxy or custom-CA variables, and a private working
+directory beneath the isolated profile. Threads are ephemeral and read-only,
+with network disabled for sandboxed tools, no approvals, no dynamic tools and
+no external instruction sources. The release-effective
+`CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED=1` startup marker disables
+persisted App Server remote control before worker threads start. The provider
+itself retains the network access needed for browser OAuth, token refresh and
+ChatGPT response generation. `--strict-config` makes Codex fail at startup
+rather than silently ignoring an unsupported isolation setting.
 
-The Codex process itself is still launched with a Glaze-owned `CODEX_HOME` and
-`CODEX_SQLITE_HOME`, a sanitised environment, no inherited authentication
-variables, an ephemeral thread, read-only filesystem policy, network disabled
-for sandboxed tools during turns, no approvals and no host-provided tools.
-The Codex process itself retains the provider and OAuth network access needed
-for ChatGPT. `--strict-config` makes Codex fail at startup rather than silently
-ignoring an unsupported isolation setting.
+App Server normally starts authenticated model-catalogue and managed-policy
+work before its `initialize` handshake. Glaze avoids that race in three ways:
+
+- it materialises the audited Codex 0.147.0 model catalogue from
+  `assets/codex/model-catalog-0.147.0.json`, verifies SHA-256
+  `20a56af9d9b33ebd124dcd94b4ab88a7cbdd66e5112aca076af41b1c3b0de0b4`,
+  and pins `model_catalog_json` before process start. The three upstream GPT-5.6
+  `code_mode_only` values are set to `null`, and all code-mode features are
+  forced and verified false, so the model cannot start Codex's V8 code-mode
+  helper;
+- it first launches and verifies a credential-free temporary profile, then
+  repeats every check against the real Glaze profile;
+- it pins generation's `openai_base_url` to
+  `https://chatgpt.com/backend-api/codex`, but pins the auxiliary
+  `chatgpt_base_url` to the closed local TLS endpoint `https://127.0.0.1:1`.
+  Browser OAuth and token refresh still use Codex's dedicated OpenAI auth
+  endpoints. Auxiliary cloud-policy, plugin and remote-control work therefore
+  has no usable route before verification.
+
+The bundled catalogue is a safety-restricted derivative of OpenAI Codex
+0.147.0 and remains under its Apache-2.0 terms;
+`assets/codex/LICENSE-APACHE` and `assets/codex/NOTICE` retain the upstream
+attribution. It is also accepted by the audited 0.149.0 App Server, but it is
+static rather than account-specific. A model may therefore appear in Glaze even
+when the signed-in plan cannot use it, and newly released models require a
+reviewed catalogue update.
+
+`CODEX_HOME` does not suppress every Codex configuration source by itself.
+Before Glaze performs account access, browser sign-in, model listing or thread
+creation, it reads the effective layered configuration and requires exactly its
+own user and highest-precedence session layers plus Codex's built-in empty
+system layer. Project, MDM, enterprise, legacy, unknown and non-empty system
+layers fail closed. The effective provider must be the built-in `openai`
+provider, its two base URLs and local catalogue path must match exactly, custom
+provider definitions must be absent, managed requirements must be absent and
+the MCP inventory must be empty. Account responses must confirm
+`requiresOpenaiAuth`, and every created thread must report `openai` as its
+provider at both response levels. `project_root_markers=[]` and private working
+directories prevent project discovery. Immediately before every process start,
+Glaze also refuses the audited host-policy sources: `/etc/codex` policy files,
+macOS `com.openai.codex` managed preferences, Windows ProgramData policy files,
+and the real Windows profile's `.agents\\skills` root. That Windows root is
+checked separately because the audited Rust dependency resolves it through the
+Shell rather than the isolated `USERPROFILE` variable.
+
+Business, Enterprise and Education accounts are deliberately unsupported
+because their workspace may provide managed Codex configuration. Glaze detects
+those plan types after first-time OAuth, logs the isolated profile out
+immediately and does not start a conversation. Personal and team-like plans are
+supported only when their reported plan type is in the audited allowlist;
+missing or future plan names fail closed. Settings also exposes **Reset ChatGPT
+sign-in**. Authenticated App Server lifetimes are globally serialised because
+Codex's refresh lock is process-local. Reset waits for the active process to
+close and for shutdown to be verified, then deletes only `auth.json` and the
+managed-policy cache inside Glaze's dedicated Codex home. This prevents a
+concurrent token refresh from recreating a credential after reset.
+
+The isolated profile also disables shell snapshot, shell/unified execution,
+code mode, apps, plugins, MCP, memories, skills, web search, image generation,
+computer use, multi-agent work, planning and user-input tools. Startup timeout
+and user cancellation are propagated into both preflight and authenticated
+process startup. A completion is delivered only after verified process
+termination and private turn-workspace removal.
+
+On Windows, Glaze launches only the native `codex.exe` process with shell
+resolution disabled. It does not launch `codex.cmd` or another command-shell
+wrapper, because terminating a wrapper would not reliably terminate the native
+App Server child. A standalone Codex installation in
+`%USERPROFILE%\.codex\packages\standalone\current\bin` is detected in addition
+to a native executable already present on `PATH`. Shutdown uses the trusted
+system `taskkill.exe /T /F` route and verifies that the native process exits.
 
 ## `path_provider_foundation` + `objective_c` on Windows
 

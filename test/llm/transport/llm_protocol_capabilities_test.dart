@@ -73,9 +73,8 @@ void main() {
     expect(capabilities.isDesktopOnly, isFalse);
   });
 
-  test('Codex is available only on native desktop targets', () {
+  test('Codex is available only on supported native desktop builds', () {
     for (final platform in const [
-      TargetPlatform.macOS,
       TargetPlatform.windows,
       TargetPlatform.linux,
     ]) {
@@ -83,11 +82,28 @@ void main() {
         LlmProtocolPlatformSupport.isAvailableOn(
           LlmProtocol.codexChatgpt,
           platform,
+          isReleaseMode: true,
         ),
         isTrue,
         reason: platform.name,
       );
     }
+    expect(
+      LlmProtocolPlatformSupport.isAvailableOn(
+        LlmProtocol.codexChatgpt,
+        TargetPlatform.macOS,
+        isReleaseMode: false,
+      ),
+      isTrue,
+    );
+    expect(
+      LlmProtocolPlatformSupport.isAvailableOn(
+        LlmProtocol.codexChatgpt,
+        TargetPlatform.macOS,
+        isReleaseMode: true,
+      ),
+      isFalse,
+    );
     for (final platform in const [
       TargetPlatform.android,
       TargetPlatform.iOS,
@@ -97,6 +113,7 @@ void main() {
         LlmProtocolPlatformSupport.isAvailableOn(
           LlmProtocol.codexChatgpt,
           platform,
+          isReleaseMode: false,
         ),
         isFalse,
         reason: platform.name,
@@ -107,6 +124,7 @@ void main() {
         LlmProtocol.codexChatgpt,
         TargetPlatform.macOS,
         isWeb: true,
+        isReleaseMode: false,
       ),
       isFalse,
     );
@@ -125,6 +143,7 @@ void main() {
         LlmProtocol.openai,
         TargetPlatform.macOS,
         isWeb: true,
+        isReleaseMode: true,
       ),
       isTrue,
     );
